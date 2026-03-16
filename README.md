@@ -4,6 +4,8 @@ Desktop voice assistant. Fully offline, all ML models run locally.
 
 Nuxt 3 + Tauri 2 + Rust audio pipeline.
 
+[Prerequisites](#prerequisites) · [Models](#models) · [Development](#development) · [Architecture](#architecture) · [Roadmap](#roadmap)
+
 ## Prerequisites
 
 - **Node.js** 18+
@@ -129,3 +131,84 @@ Microphone (cpal) → Resample 48kHz→16kHz (rubato) → Silero VAD (ort/ONNX)
 ```
 
 Three threads: audio capture, VAD processing, whisper transcription. Connected via crossbeam channels.
+
+## Roadmap
+
+<details>
+<summary><b>MVP (Audio Pipeline)</b> — done</summary>
+
+| Feature                            | Status | Details                                             |
+| ---------------------------------- | ------ | --------------------------------------------------- |
+| cpal capture + rubato resampling   | done   | 48kHz→16kHz mono f32                                |
+| Silero VAD (ort/ONNX)              | done   | 512-sample chunks, threshold 0.5                    |
+| whisper-rs transcription           | done   | Base model as placeholder                           |
+| Wake word fuzzy matching (strsim)  | done   | 3 commands: приём, вписывай, готово                 |
+| Pipeline orchestration (3 threads) | done   | Processing + Transcription + Capture                |
+| Tauri IPC (events + commands)      | done   | start/stop_listening, get_audio_state, test_capture |
+| Model check + banner               | done   | check_models command, platform-aware paths          |
+| Frontend state sync                | done   | Pinia store + Tauri event listeners                 |
+
+</details>
+
+<details>
+<summary><b>Post-MVP — Rust Backend</b></summary>
+
+| Feature                      | Status  | Details                                                  |
+| ---------------------------- | ------- | -------------------------------------------------------- |
+| ct2rs (CTranslate2)          | planned | Main STT for NVIDIA GPU + CPU                            |
+| parakeet-rs (Parakeet TDT)   | planned | Main STT for AMD/Intel GPU + CPU, ONNX ~600MB            |
+| STT engine trait/abstraction | planned | Common interface for swapping engines                    |
+| enigo text injection         | planned | Hybrid: SendInput <100 chars, clipboard+paste for longer |
+| Sound feedback (rodio/cpal)  | planned | Audio cues for state transitions                         |
+| Kando integration            | planned | Launch mechanism for command mode                        |
+| Hotkey fallback              | planned | Global hotkey as wake word alternative                   |
+| Model download mechanism     | planned | Auto-download with progress UI                           |
+| Whisper tiny for wake word   | planned | Switch from base (~150MB) to tiny (~75MB)                |
+
+</details>
+
+<details>
+<summary><b>Post-MVP — Auto-Configuration</b></summary>
+
+| Feature                     | Status          | Details                                  |
+| --------------------------- | --------------- | ---------------------------------------- |
+| Hardware detection          | planned         | GPU vendor/VRAM, CPU, RAM                |
+| Engine/model recommendation | planned         | Optimal engine + model based on hardware |
+| First-launch wizard         | requires design | User-friendly setup flow                 |
+
+</details>
+
+<details>
+<summary><b>Post-MVP — UX / Frontend</b></summary>
+
+| Feature               | Status          | Details                                           |
+| --------------------- | --------------- | ------------------------------------------------- |
+| Overlay indicator     | requires design | Transparent always-on-top window, click-through   |
+| Circular waveform     | requires design | Compact dictation indicator                       |
+| Subtle idle indicator | requires design | Minimal, like OpenWhispr                          |
+| Settings page         | requires design | STT engine, input mode, history, hotkey, models   |
+| History UI            | requires design | Command/dictation log with configurable retention |
+
+</details>
+
+<details>
+<summary><b>Post-MVP — Banners / Guides</b></summary>
+
+| Banner                | Platform | Details                         |
+| --------------------- | -------- | ------------------------------- |
+| Admin elevation       | Windows  | UIPI warning if not elevated    |
+| Model guide           | All      | First-launch model selection    |
+| Cyrillic path warning | Windows  | Warning + autofix               |
+| Wayland limitations   | Linux    | Clipboard+paste fallback notice |
+
+</details>
+
+<details>
+<summary><b>Future — macOS</b></summary>
+
+| Feature                    | Details                                                         |
+| -------------------------- | --------------------------------------------------------------- |
+| macOS support              | Accessibility + Microphone permissions, Notarization, Metal GPU |
+| Apple Silicon optimization | Metal backend for ONNX Runtime and whisper.cpp                  |
+
+</details>

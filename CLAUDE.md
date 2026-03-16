@@ -311,31 +311,32 @@ pnpm format          # Prettier
 
 ### MVP (Audio Pipeline) — `done`
 
-| Фича                               | Статус | Детали                                              |
-| ---------------------------------- | ------ | --------------------------------------------------- |
-| cpal capture + rubato resampling   | done   | 48kHz→16kHz mono f32                                |
-| Silero VAD (ort/ONNX)              | done   | 512-sample chunks, threshold 0.5                    |
-| whisper-rs transcription           | done   | Используется base модель как placeholder            |
-| Wake word fuzzy matching (strsim)  | done   | 3 команды: приём, вписывай, готово                  |
-| Pipeline orchestration (3 threads) | done   | Processing + Transcription + Capture                |
-| Tauri IPC (events + commands)      | done   | start/stop_listening, get_audio_state, test_capture |
-| Frontend state sync                | done   | Pinia store + Tauri event listeners                 |
-| Basic pulse indicator              | done   | Анимация при активном состоянии                     |
+| Фича                               | Статус | Детали                                                                       |
+| ---------------------------------- | ------ | ---------------------------------------------------------------------------- |
+| cpal capture + rubato resampling   | done   | 48kHz→16kHz mono f32                                                         |
+| Silero VAD (ort/ONNX)              | done   | 512-sample chunks, threshold 0.5                                             |
+| whisper-rs transcription           | done   | Используется base модель как placeholder                                     |
+| Wake word fuzzy matching (strsim)  | done   | 3 команды: приём, вписывай, готово                                           |
+| Pipeline orchestration (3 threads) | done   | Processing + Transcription + Capture                                         |
+| Tauri IPC (events + commands)      | done   | start/stop_listening, get_audio_state, test_capture                          |
+| Model check + banner               | done   | check_models command, platform-aware paths, UI баннер при отсутствии моделей |
+| Frontend state sync                | done   | Pinia store + Tauri event listeners                                          |
+| Basic pulse indicator              | done   | Анимация при активном состоянии                                              |
 
 ### Post-MVP — Rust Backend
 
-| Фича                             | Статус  | Зависимости           | Детали                                                                                                        |
-| -------------------------------- | ------- | --------------------- | ------------------------------------------------------------------------------------------------------------- |
-| ct2rs (CTranslate2)              | planned | —                     | Основной STT для NVIDIA GPU + CPU. Заменит whisper-rs для диктовки. Rust crate: `ct2rs`                       |
-| parakeet-rs (Parakeet TDT)       | planned | —                     | Основной STT для AMD/Intel GPU + CPU. ONNX модель ~600MB. Rust crate: `parakeet-rs`                           |
-| STT engine trait/abstraction     | planned | ct2rs или parakeet-rs | Общий интерфейс для подмены движка. Текущий `Transcriber` — точка абстракции                                  |
-| enigo text injection             | planned | —                     | Гибрид: SendInput <100 символов, clipboard+paste для длинного. **Requires UX design:** настройка режима ввода |
-| Sound feedback (rodio/cpal)      | planned | —                     | **Requires UX design:** какие звуки, на какие события (wake word? start/stop dictation?)                      |
-| Kando integration                | planned | —                     | **Requires UX design:** механизм запуска (shell command? hotkey? IPC?)                                        |
-| Hotkey fallback                  | planned | —                     | **Requires UX design:** какая клавиша, настраиваемость, глобальный хоткей через Tauri                         |
-| Model download mechanism         | planned | —                     | **Requires UX design:** UI прогресса скачивания, откуда качать, checksum, retry, оффлайн-fallback             |
-| Configurable model paths         | planned | —                     | Каноничные пути: Windows `C:\creo-data\`, Linux `~/.local/share/creo/`. MVP temp: `C:/creo-models/`           |
-| Whisper tiny model for wake word | planned | —                     | Сейчас base (~150MB), целевая tiny (~75MB). Переход после стабилизации пайплайна                              |
+| Фича                             | Статус  | Зависимости           | Детали                                                                                                                                    |
+| -------------------------------- | ------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| ct2rs (CTranslate2)              | planned | —                     | Основной STT для NVIDIA GPU + CPU. Заменит whisper-rs для диктовки. Rust crate: `ct2rs`                                                   |
+| parakeet-rs (Parakeet TDT)       | planned | —                     | Основной STT для AMD/Intel GPU + CPU. ONNX модель ~600MB. Rust crate: `parakeet-rs`                                                       |
+| STT engine trait/abstraction     | planned | ct2rs или parakeet-rs | Общий интерфейс для подмены движка. Текущий `Transcriber` — точка абстракции                                                              |
+| enigo text injection             | planned | —                     | Гибрид: SendInput <100 символов, clipboard+paste для длинного. **Requires UX design:** настройка режима ввода                             |
+| Sound feedback (rodio/cpal)      | planned | —                     | **Requires UX design:** какие звуки, на какие события (wake word? start/stop dictation?)                                                  |
+| Kando integration                | planned | —                     | **Requires UX design:** механизм запуска (shell command? hotkey? IPC?)                                                                    |
+| Hotkey fallback                  | planned | —                     | **Requires UX design:** какая клавиша, настраиваемость, глобальный хоткей через Tauri                                                     |
+| Model download mechanism         | planned | —                     | **Requires UX design:** UI прогресса скачивания, откуда качать, checksum, retry, оффлайн-fallback                                         |
+| Configurable model paths         | planned | —                     | Каноничные пути уже используются (Windows `C:\creo-data\models\`, Linux `~/.local/share/creo/models/`). Эта фича — про настройку через UI |
+| Whisper tiny model for wake word | planned | —                     | Сейчас base (~150MB), целевая tiny (~75MB). Переход после стабилизации пайплайна                                                          |
 
 ### Post-MVP — Auto-Configuration
 
