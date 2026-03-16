@@ -25,7 +25,12 @@ tauri = { version = "2.9.5", features = ["config-json5"] }
 tauri-plugin-log = "2"
 tauri-plugin-os = "2"
 tauri-plugin-fs = "2"
-# Future audio pipeline dependencies
-# cpal = "0.15"       # Audio I/O
-# whisper-rs = "0.11"  # Speech-to-text
-# vad-rs = "0.1"       # Voice activity detection
+anyhow = "1.0"
+
+# Audio pipeline
+cpal = "0.15"
+rubato = "0.16"
+ort = { version = "2.0.0-rc.12", features = ["download-binaries"] }
+whisper-rs = "0.16"
+crossbeam-channel = "0.5"
+strsim = "0.11"

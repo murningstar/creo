@@ -5,7 +5,7 @@
     "identifier": "creo",
     "build": {
         "frontendDist": "../dist",
-        "devUrl": "http://localhost:1337",
+        "devUrl": "http://localhost:4730",
         "beforeDevCommand": "pnpm dev",
         "beforeBuildCommand": "pnpm generate"
     },

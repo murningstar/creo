@@ -45,7 +45,7 @@ export default defineNuxtConfig(
             // #region Tauri && Vite cfg
             devServer: {
                 host: '0.0.0.0',
-                port: 1337,
+                port: 4730,
             },
 
             vite: {
