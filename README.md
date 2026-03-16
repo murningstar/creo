@@ -134,72 +134,76 @@ Three threads: audio capture, VAD processing, whisper transcription. Connected v
 
 ## Roadmap
 
+Statuses: `done`, `in-progress`, `planned`, `requires design` (UX/UI must be agreed before implementation).
+
 <details>
 <summary><b>MVP (Audio Pipeline)</b> — done</summary>
 
-| Feature                            | Status | Details                                             |
-| ---------------------------------- | ------ | --------------------------------------------------- |
-| cpal capture + rubato resampling   | done   | 48kHz→16kHz mono f32                                |
-| Silero VAD (ort/ONNX)              | done   | 512-sample chunks, threshold 0.5                    |
-| whisper-rs transcription           | done   | Base model as placeholder                           |
-| Wake word fuzzy matching (strsim)  | done   | 3 commands: приём, вписывай, готово                 |
-| Pipeline orchestration (3 threads) | done   | Processing + Transcription + Capture                |
-| Tauri IPC (events + commands)      | done   | start/stop_listening, get_audio_state, test_capture |
-| Model check + banner               | done   | check_models command, platform-aware paths          |
-| Frontend state sync                | done   | Pinia store + Tauri event listeners                 |
+| Feature                            | Status | Details                                                                   |
+| ---------------------------------- | ------ | ------------------------------------------------------------------------- |
+| cpal capture + rubato resampling   | done   | 48kHz→16kHz mono f32                                                      |
+| Silero VAD (ort/ONNX)              | done   | 512-sample chunks, threshold 0.5                                          |
+| whisper-rs transcription           | done   | Base model (~150MB) as placeholder for both wake word and dictation       |
+| Wake word fuzzy matching (strsim)  | done   | 3 commands: приём, вписывай, готово                                       |
+| Pipeline orchestration (3 threads) | done   | Processing + Transcription + Capture, crossbeam channels                  |
+| Tauri IPC (events + commands)      | done   | start/stop_listening, get_audio_state, test_capture, check_models         |
+| Model check + banner               | done   | check_models command, platform-aware paths, UI banner when models missing |
+| Frontend state sync                | done   | Pinia store + Tauri event listeners                                       |
+| Basic pulse indicator              | done   | Pulse animation when not idle                                             |
 
 </details>
 
 <details>
 <summary><b>Post-MVP — Rust Backend</b></summary>
 
-| Feature                      | Status  | Details                                                  |
-| ---------------------------- | ------- | -------------------------------------------------------- |
-| ct2rs (CTranslate2)          | planned | Main STT for NVIDIA GPU + CPU                            |
-| parakeet-rs (Parakeet TDT)   | planned | Main STT for AMD/Intel GPU + CPU, ONNX ~600MB            |
-| STT engine trait/abstraction | planned | Common interface for swapping engines                    |
-| enigo text injection         | planned | Hybrid: SendInput <100 chars, clipboard+paste for longer |
-| Sound feedback (rodio/cpal)  | planned | Audio cues for state transitions                         |
-| Kando integration            | planned | Launch mechanism for command mode                        |
-| Hotkey fallback              | planned | Global hotkey as wake word alternative                   |
-| Model download mechanism     | planned | Auto-download with progress UI                           |
-| Whisper tiny for wake word   | planned | Switch from base (~150MB) to tiny (~75MB)                |
+| Feature                      | Status  | Dependencies         | Details                                                                                                                                                |
+| ---------------------------- | ------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| ct2rs (CTranslate2)          | planned | —                    | Main STT for NVIDIA GPU + CPU. Replaces whisper-rs for dictation. Rust crate: `ct2rs`                                                                  |
+| parakeet-rs (Parakeet TDT)   | planned | —                    | Main STT for AMD/Intel GPU + CPU. ONNX model ~600MB. Better Russian WER. Rust crate: `parakeet-rs`                                                     |
+| STT engine trait/abstraction | planned | ct2rs or parakeet-rs | Common interface for swapping engines. Current `Transcriber` struct is the abstraction point                                                           |
+| enigo text injection         | planned | —                    | Hybrid: SendInput <100 chars, clipboard+paste for longer. **Requires design:** input mode setting (auto / always type / always paste)                  |
+| Sound feedback (rodio/cpal)  | planned | —                    | **Requires design:** which sounds, on which events (wake word recognition? start/stop dictation?)                                                      |
+| Kando integration            | planned | —                    | **Requires design:** launch mechanism (shell command? hotkey? IPC?)                                                                                    |
+| Hotkey fallback              | planned | —                    | **Requires design:** which key, configurability, global hotkey via Tauri                                                                               |
+| Model download mechanism     | planned | —                    | **Requires design:** download progress UI, sources, checksum verification, retry, offline fallback (user brings own models)                            |
+| Configurable model paths     | planned | —                    | Canonical paths already used (Windows `C:\creo-data\models\`, Linux `~/.local/share/creo/models/`). This feature is about UI settings for custom paths |
+| Whisper tiny for wake word   | planned | —                    | Currently base (~150MB), target tiny (~75MB). Switch after pipeline stabilization                                                                      |
 
 </details>
 
 <details>
 <summary><b>Post-MVP — Auto-Configuration</b></summary>
 
-| Feature                     | Status          | Details                                  |
-| --------------------------- | --------------- | ---------------------------------------- |
-| Hardware detection          | planned         | GPU vendor/VRAM, CPU, RAM                |
-| Engine/model recommendation | planned         | Optimal engine + model based on hardware |
-| First-launch wizard         | requires design | User-friendly setup flow                 |
+| Feature                     | Status          | Details                                                                                             |
+| --------------------------- | --------------- | --------------------------------------------------------------------------------------------------- |
+| Hardware detection          | planned         | GPU vendor/VRAM, CPU, RAM                                                                           |
+| Engine/model recommendation | planned         | Optimal engine + model + quantization based on hardware                                             |
+| First-launch wizard         | requires design | How to present recommendation, how user overrides. Non-technical, user-friendly — no GPU/CPU jargon |
 
 </details>
 
 <details>
 <summary><b>Post-MVP — UX / Frontend</b></summary>
 
-| Feature               | Status          | Details                                           |
-| --------------------- | --------------- | ------------------------------------------------- |
-| Overlay indicator     | requires design | Transparent always-on-top window, click-through   |
-| Circular waveform     | requires design | Compact dictation indicator                       |
-| Subtle idle indicator | requires design | Minimal, like OpenWhispr                          |
-| Settings page         | requires design | STT engine, input mode, history, hotkey, models   |
-| History UI            | requires design | Command/dictation log with configurable retention |
+| Feature                             | Status          | Details                                                                                                       |
+| ----------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------- |
+| Overlay indicator (separate window) | requires design | Transparent, always-on-top, click-through. Pulse wave visible in peripheral vision, doesn't block interaction |
+| Circular waveform (dictation)       | requires design | Compact circular indicator, not a wide rectangle                                                              |
+| Subtle idle indicator               | requires design | Barely noticeable, like OpenWhispr                                                                            |
+| Settings page                       | requires design | Scope: STT engine, text input mode, history retention, hotkey, model management                               |
+| History UI                          | requires design | Command/dictation log with configurable retention (days). Accessible from settings and on first launch        |
 
 </details>
 
 <details>
 <summary><b>Post-MVP — Banners / Guides</b></summary>
 
-| Banner                | Platform | Details                         |
-| --------------------- | -------- | ------------------------------- |
-| Admin elevation       | Windows  | UIPI warning if not elevated    |
-| Model guide           | All      | First-launch model selection    |
-| Cyrillic path warning | Windows  | Warning + autofix               |
-| Wayland limitations   | Linux    | Clipboard+paste fallback notice |
+| Banner                | Status          | Platform | Details                                                                        |
+| --------------------- | --------------- | -------- | ------------------------------------------------------------------------------ |
+| Admin elevation       | requires design | Windows  | Consequences of running without admin (UIPI: can't type into elevated windows) |
+| Model guide           | requires design | All      | First-launch model/engine selection guide                                      |
+| Cyrillic path warning | requires design | Windows  | Warning + autofix for non-ASCII user paths                                     |
+| Wayland limitations   | requires design | Linux    | Notice about clipboard+paste fallback for text injection                       |
 
 </details>
 
