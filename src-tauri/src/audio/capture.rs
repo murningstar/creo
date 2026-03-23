@@ -9,6 +9,13 @@ use rubato::{
 const TARGET_SAMPLE_RATE: u32 = 16000;
 const CHANNEL_CAPACITY: usize = 64;
 
+/// Rubato SincFixedIn quality/performance tradeoff parameters.
+const RESAMPLER_SINC_LEN: usize = 256;
+const RESAMPLER_CUTOFF: f32 = 0.95;
+const RESAMPLER_OVERSAMPLING: usize = 256;
+/// Minimum chunk size for rubato — 480 samples = 30ms at 16kHz.
+const MIN_RESAMPLER_CHUNK: usize = 480;
+
 pub struct AudioCapture {
     _stream: Stream,
 }
@@ -80,13 +87,13 @@ impl AudioResampler {
         }
 
         let ratio = TARGET_SAMPLE_RATE as f64 / source_rate as f64;
-        let chunk_size = (source_rate as usize / 100).max(480); // ~10ms chunks
+        let chunk_size = (source_rate as usize / 100).max(MIN_RESAMPLER_CHUNK); // ~10ms chunks, clamped to rubato minimum
 
         let params = SincInterpolationParameters {
-            sinc_len: 256,
-            f_cutoff: 0.95,
+            sinc_len: RESAMPLER_SINC_LEN,
+            f_cutoff: RESAMPLER_CUTOFF,
             interpolation: SincInterpolationType::Linear,
-            oversampling_factor: 256,
+            oversampling_factor: RESAMPLER_OVERSAMPLING,
             window: WindowFunction::BlackmanHarris2,
         };
 

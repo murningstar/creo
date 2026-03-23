@@ -1,4 +1,3 @@
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -10,63 +9,66 @@ use tauri::{AppHandle, Emitter};
 use super::capture::AudioResampler;
 use super::transcriber::Transcriber;
 use super::vad::SileroVad;
+use super::wakeword::WakeWordDetector;
 use super::{
-    AudioMode, AudioStatePayload, ErrorPayload, PipelineHandle, TranscriptionPayload,
-    TranscriptionRequest, TranscriptionResult, VadStatePayload, WakeCommand, WakeCommandPayload,
+    AudioMode, ErrorPayload, PipelineHandle, TranscriptionPayload, TranscriptionRequest,
+    TranscriptionResult, VadStatePayload, WakeCommand, WakeCommandPayload,
 };
 
 const VAD_SILENCE_TIMEOUT_MS: u64 = 300;
 const MIN_SPEECH_SAMPLES: usize = 4000; // ~250ms at 16kHz
+const TRANSCRIPTION_CHANNEL_CAPACITY: usize = 4;
 
 pub fn start_pipeline(
     app_handle: AppHandle,
     handle: Arc<PipelineHandle>,
     vad_model_path: String,
-    whisper_model_path: String,
+    mel_model_path: String,
+    emb_model_path: String,
+    wakewords_dir: String,
+    dictation_model_path: String,
 ) -> Result<()> {
-    let shutdown = handle.shutdown.clone();
-    let mode = handle.mode.clone();
-
-    // Set initial mode
-    handle.set_mode(AudioMode::Listening);
-    let _ = app_handle.emit(
-        "audio-state-changed",
-        AudioStatePayload {
-            mode: AudioMode::Listening,
-        },
-    );
+    handle.transition_mode(&app_handle, AudioMode::Listening);
 
     // Channels between processing ↔ transcription threads
     let (trans_tx, trans_rx): (Sender<TranscriptionRequest>, Receiver<TranscriptionRequest>) =
-        bounded(4);
+        bounded(TRANSCRIPTION_CHANNEL_CAPACITY);
     let (result_tx, result_rx): (Sender<TranscriptionResult>, Receiver<TranscriptionResult>) =
-        bounded(4);
+        bounded(TRANSCRIPTION_CHANNEL_CAPACITY);
 
-    // Transcription thread
+    // Transcription thread (wake word via embedding+DTW, dictation via whisper)
     let app2 = app_handle.clone();
-    let shutdown2 = shutdown.clone();
+    let handle2 = handle.clone();
     let transcription_handle = thread::spawn(move || {
-        if let Err(e) =
-            transcription_thread(app2, trans_rx, result_tx, shutdown2, &whisper_model_path)
-        {
+        if let Err(e) = transcription_thread(
+            app2,
+            handle2,
+            trans_rx,
+            result_tx,
+            &mel_model_path,
+            &emb_model_path,
+            &wakewords_dir,
+            &dictation_model_path,
+        ) {
             log::error!("Transcription thread error: {}", e);
         }
     });
 
     // Processing thread — creates cpal capture internally (Stream is !Send)
     let app1 = app_handle.clone();
-    let shutdown1 = shutdown.clone();
-    let mode1 = mode.clone();
+    let handle1 = handle.clone();
     let processing_handle = thread::spawn(move || {
-        if let Err(e) = processing_thread(app1, trans_tx, result_rx, shutdown1, mode1, &vad_model_path)
-        {
+        if let Err(e) = processing_thread(app1, handle1, trans_tx, result_rx, &vad_model_path) {
             log::error!("Processing thread error: {}", e);
         }
     });
 
-    let mut threads = handle.threads.lock().unwrap();
-    threads.push(processing_handle);
-    threads.push(transcription_handle);
+    handle
+        .push_thread(processing_handle)
+        .map_err(|e| anyhow::anyhow!(e))?;
+    handle
+        .push_thread(transcription_handle)
+        .map_err(|e| anyhow::anyhow!(e))?;
 
     log::info!("Pipeline started");
     Ok(())
@@ -74,10 +76,9 @@ pub fn start_pipeline(
 
 fn processing_thread(
     app: AppHandle,
+    handle: Arc<PipelineHandle>,
     trans_tx: Sender<TranscriptionRequest>,
     result_rx: Receiver<TranscriptionResult>,
-    shutdown: Arc<AtomicBool>,
-    mode: Arc<AtomicU8>,
     vad_model_path: &str,
 ) -> Result<()> {
     use super::capture::AudioCapture;
@@ -100,15 +101,14 @@ fn processing_thread(
     );
 
     loop {
-        if shutdown.load(Ordering::Relaxed) {
+        if handle.is_shutdown() {
             let _ = trans_tx.send(TranscriptionRequest::Shutdown);
             break;
         }
 
         // Check for transcription results (non-blocking)
         while let Ok(result) = result_rx.try_recv() {
-            let current_mode = AudioMode::from_u8(mode.load(Ordering::Relaxed));
-            handle_transcription_result(&app, &mode, result, current_mode);
+            handle_transcription_result(&app, &handle, result);
         }
 
         // Receive audio (with timeout to check shutdown periodically)
@@ -118,13 +118,22 @@ fn processing_thread(
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
         };
 
-        let current_mode = AudioMode::from_u8(mode.load(Ordering::Relaxed));
-        if current_mode == AudioMode::Idle {
+        if handle.current_mode() == AudioMode::Idle {
             continue;
         }
 
         // Resample to 16kHz
         let resampled = resampler.process(&chunk);
+
+        // TEMPORARY: log audio RMS every ~1 sec to confirm mic captures speech
+        // TODO: remove after confirming pipeline works end-to-end
+        static AUDIO_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let ac = AUDIO_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if ac % 30 == 0 && !resampled.is_empty() {
+            let rms = (resampled.iter().map(|s| s * s).sum::<f32>() / resampled.len() as f32).sqrt();
+            log::info!("Audio RMS: {:.6} (resampled {} samples)", rms, resampled.len());
+        }
+
         vad_buffer.extend_from_slice(&resampled);
 
         // Process VAD in 512-sample chunks
@@ -145,7 +154,7 @@ fn processing_thread(
                 silence_start = None;
                 if !is_speaking {
                     is_speaking = true;
-                    log::debug!("Speech started");
+                    log::info!("Speech started");
                 }
                 speech_buffer.extend_from_slice(&vad_chunk);
             } else if is_speaking {
@@ -166,17 +175,10 @@ fn processing_thread(
 
                         if speech_buffer.len() >= MIN_SPEECH_SAMPLES {
                             let buffer = std::mem::take(&mut speech_buffer);
-                            let current = AudioMode::from_u8(mode.load(Ordering::Relaxed));
 
-                            match current {
+                            match handle.current_mode() {
                                 AudioMode::Listening => {
-                                    mode.store(AudioMode::Processing.as_u8(), Ordering::Relaxed);
-                                    let _ = app.emit(
-                                        "audio-state-changed",
-                                        AudioStatePayload {
-                                            mode: AudioMode::Processing,
-                                        },
-                                    );
+                                    handle.transition_mode(&app, AudioMode::Processing);
                                     let _ =
                                         trans_tx.send(TranscriptionRequest::WakeWordCheck(buffer));
                                 }
@@ -204,9 +206,8 @@ fn processing_thread(
 
 fn handle_transcription_result(
     app: &AppHandle,
-    mode: &Arc<AtomicU8>,
+    handle: &PipelineHandle,
     result: TranscriptionResult,
-    current_mode: AudioMode,
 ) {
     match result {
         TranscriptionResult::WakeCommand(cmd) => {
@@ -214,32 +215,9 @@ fn handle_transcription_result(
             let _ = app.emit("wake-command", WakeCommandPayload { command: cmd });
 
             match cmd {
-                WakeCommand::Vpisyvai => {
-                    mode.store(AudioMode::Dictation.as_u8(), Ordering::Relaxed);
-                    let _ = app.emit(
-                        "audio-state-changed",
-                        AudioStatePayload {
-                            mode: AudioMode::Dictation,
-                        },
-                    );
-                }
-                WakeCommand::Gotovo => {
-                    mode.store(AudioMode::Listening.as_u8(), Ordering::Relaxed);
-                    let _ = app.emit(
-                        "audio-state-changed",
-                        AudioStatePayload {
-                            mode: AudioMode::Listening,
-                        },
-                    );
-                }
-                WakeCommand::Priem => {
-                    mode.store(AudioMode::Listening.as_u8(), Ordering::Relaxed);
-                    let _ = app.emit(
-                        "audio-state-changed",
-                        AudioStatePayload {
-                            mode: AudioMode::Listening,
-                        },
-                    );
+                WakeCommand::StartDictation => handle.transition_mode(app, AudioMode::Dictation),
+                WakeCommand::StopDictation | WakeCommand::CommandMode => {
+                    handle.transition_mode(app, AudioMode::Listening)
                 }
             }
         }
@@ -247,14 +225,8 @@ fn handle_transcription_result(
             let _ = app.emit("transcription", TranscriptionPayload { text, is_final });
         }
         TranscriptionResult::NoMatch => {
-            if current_mode == AudioMode::Processing {
-                mode.store(AudioMode::Listening.as_u8(), Ordering::Relaxed);
-                let _ = app.emit(
-                    "audio-state-changed",
-                    AudioStatePayload {
-                        mode: AudioMode::Listening,
-                    },
-                );
+            if handle.current_mode() == AudioMode::Processing {
+                handle.transition_mode(app, AudioMode::Listening);
             }
         }
     }
@@ -262,16 +234,21 @@ fn handle_transcription_result(
 
 fn transcription_thread(
     app: AppHandle,
+    handle: Arc<PipelineHandle>,
     rx: Receiver<TranscriptionRequest>,
     result_tx: Sender<TranscriptionResult>,
-    shutdown: Arc<AtomicBool>,
-    whisper_model_path: &str,
+    mel_model_path: &str,
+    emb_model_path: &str,
+    wakewords_dir: &str,
+    dictation_model_path: &str,
 ) -> Result<()> {
-    let transcriber = Transcriber::new(whisper_model_path)?;
-    log::info!("Transcription thread started, model loaded");
+    let mut wake_detector = WakeWordDetector::new(mel_model_path, emb_model_path, wakewords_dir)?;
+    log::info!("Wake word detector loaded (embedding+DTW)");
+    let dictation_transcriber = Transcriber::new(dictation_model_path)?;
+    log::info!("Dictation model loaded: {}", dictation_model_path);
 
     loop {
-        if shutdown.load(Ordering::Relaxed) {
+        if handle.is_shutdown() {
             break;
         }
 
@@ -283,49 +260,45 @@ fn transcription_thread(
 
         match request {
             TranscriptionRequest::WakeWordCheck(audio) => {
-                match transcriber.transcribe(&audio, "ru") {
-                    Ok(text) => {
-                        log::info!("Wake word check: '{}'", text);
-                        if let Some(cmd) = super::transcriber::match_wake_word(&text) {
+                if !wake_detector.has_references() {
+                    log::debug!("No wake word references loaded, skipping detection");
+                    let _ = result_tx.send(TranscriptionResult::NoMatch);
+                } else {
+                    match wake_detector.detect(&audio) {
+                        Some(cmd) => {
                             let _ = result_tx.send(TranscriptionResult::WakeCommand(cmd));
-                        } else {
+                        }
+                        None => {
                             let _ = result_tx.send(TranscriptionResult::NoMatch);
                         }
-                    }
-                    Err(e) => {
-                        log::error!("Transcription error: {}", e);
-                        let _ = app.emit(
-                            "error",
-                            ErrorPayload {
-                                message: e.to_string(),
-                            },
-                        );
-                        let _ = result_tx.send(TranscriptionResult::NoMatch);
                     }
                 }
             }
             TranscriptionRequest::DictationChunk(audio) => {
-                match transcriber.transcribe(&audio, "ru") {
+                // First check if this is a "gotovo" command via embedding+DTW
+                if wake_detector.has_references() {
+                    if let Some(WakeCommand::StopDictation) = wake_detector.detect(&audio) {
+                        let _ = result_tx
+                            .send(TranscriptionResult::WakeCommand(WakeCommand::StopDictation));
+                        continue;
+                    }
+                }
+
+                // Not a stop command — transcribe as dictation text
+                match dictation_transcriber.transcribe(&audio, "ru") {
                     Ok(text) => {
-                        if let Some(WakeCommand::Gotovo) =
-                            super::transcriber::match_wake_word(&text)
-                        {
-                            let _ = result_tx
-                                .send(TranscriptionResult::WakeCommand(WakeCommand::Gotovo));
-                        } else {
-                            let trimmed = text.trim().to_string();
-                            if !trimmed.is_empty() {
-                                let _ = result_tx.send(TranscriptionResult::DictationText {
-                                    text: trimmed,
-                                    is_final: true,
-                                });
-                            }
+                        let trimmed = text.trim().to_string();
+                        if !trimmed.is_empty() {
+                            let _ = result_tx.send(TranscriptionResult::DictationText {
+                                text: trimmed,
+                                is_final: true,
+                            });
                         }
                     }
                     Err(e) => {
                         log::error!("Dictation error: {}", e);
                         let _ = app.emit(
-                            "error",
+                            "audio-error",
                             ErrorPayload {
                                 message: e.to_string(),
                             },

@@ -6,7 +6,7 @@ authors = ["you"]
 license = ""
 repository = ""
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.88.0"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -29,8 +29,35 @@ anyhow = "1.0"
 
 # Audio pipeline
 cpal = "0.15"
+# nnnoiseless (RNNoise) was evaluated and REJECTED.
+# Research shows denoising HURTS Whisper WER in all conditions (arxiv 2512.17562).
+# Whisper uses noise as context for transcription — removing it degrades accuracy.
+# Also requires 48kHz (double resampling overhead for no benefit).
 rubato = "0.16"
 ort = { version = "2.0.0-rc.12", features = ["download-binaries"] }
+# silero-vad-rust 6.2.1 has ndarray 0.16/0.17 conflict with ort 2.0.0-rc.12.
+# Using manual Silero VAD v5 implementation until crate resolves this.
+# TODO: switch to silero-vad-rust crate when ndarray versions align.
+# Track: https://github.com/sheldonix/silero-vad-rust/issues
 whisper-rs = "0.16"
 crossbeam-channel = "0.5"
 strsim = "0.11"
+
+# Text injection
+arboard = { version = "3.6", features = ["wayland-data-control"] }
+enigo = "0.6"
+
+# Settings persistence
+tauri-plugin-store = "2"
+
+# Wake word / command classification (embedding + SVM)
+linfa = "0.7"
+linfa-svm = "0.7"
+ndarray = "0.17"
+
+# Window state persistence
+tauri-plugin-window-state = "2"
+
+# System detection
+sysinfo = "0.38"
+ash = { version = "0.38", default-features = false, features = ["loaded"] }

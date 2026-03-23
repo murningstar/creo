@@ -1,28 +1,8 @@
 use anyhow::{Context, Result};
-use strsim::normalized_levenshtein;
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-use super::WakeCommand;
-
-const WAKE_THRESHOLD: f64 = 0.55;
-
-const WAKE_PATTERNS: &[(&str, WakeCommand)] = &[
-    ("крео приём", WakeCommand::Priem),
-    ("крео прием", WakeCommand::Priem),
-    ("крео приём.", WakeCommand::Priem),
-    ("крео прием.", WakeCommand::Priem),
-    ("крео, приём", WakeCommand::Priem),
-    ("крео, прием", WakeCommand::Priem),
-    ("крио приём", WakeCommand::Priem),
-    ("крио прием", WakeCommand::Priem),
-    ("крео вписывай", WakeCommand::Vpisyvai),
-    ("крео, вписывай", WakeCommand::Vpisyvai),
-    ("крио вписывай", WakeCommand::Vpisyvai),
-    ("крео готово", WakeCommand::Gotovo),
-    ("крео, готово", WakeCommand::Gotovo),
-    ("крио готово", WakeCommand::Gotovo),
-];
-
+/// Whisper-based transcriber for dictation (continuous speech-to-text).
+/// Wake word detection is handled by wakeword.rs (embedding+DTW), not here.
 pub struct Transcriber {
     ctx: WhisperContext,
 }
@@ -66,29 +46,4 @@ impl Transcriber {
 
         Ok(text.trim().to_string())
     }
-}
-
-/// Match transcribed text against known wake word patterns using fuzzy matching.
-pub fn match_wake_word(text: &str) -> Option<WakeCommand> {
-    let normalized = text
-        .to_lowercase()
-        .trim()
-        .replace(',', "")
-        .replace('.', "");
-    let normalized = normalized.trim();
-
-    if normalized.is_empty() {
-        return None;
-    }
-
-    WAKE_PATTERNS
-        .iter()
-        .map(|(pattern, cmd)| {
-            let clean_pattern = pattern.replace(',', "").replace('.', "");
-            let score = normalized_levenshtein(normalized, clean_pattern.trim());
-            (score, *cmd)
-        })
-        .filter(|(score, _)| *score >= WAKE_THRESHOLD)
-        .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
-        .map(|(_, cmd)| cmd)
 }

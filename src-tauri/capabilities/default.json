@@ -8,6 +8,8 @@
         "os:default",
         "fs:allow-read-text-file",
         "fs:allow-resource-read-recursive",
-        "fs:default"
+        "fs:default",
+        "store:default",
+        "window-state:default"
     ]
 }
