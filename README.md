@@ -61,9 +61,27 @@ mkdir -p ~/.local/share/creo/models
 curl -L -o ~/.local/share/creo/models/silero_vad_v5.onnx "https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx"
 ```
 
+### Whisper Tiny GGML (~75 MB)
+
+Lightweight model for wake word detection ("Крео, приём/вписывай/готово").
+
+**Download:** go to https://huggingface.co/ggerganov/whisper.cpp/tree/main and download `ggml-tiny.bin`.
+
+Or via command line (Windows):
+
+```bash
+curl -L -o "C:\creo-data\models\ggml-tiny.bin" "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
+```
+
+Linux:
+
+```bash
+curl -L -o ~/.local/share/creo/models/ggml-tiny.bin "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
+```
+
 ### Whisper Base GGML (~150 MB)
 
-Speech-to-text model. Used for wake word detection and dictation (MVP).
+Speech-to-text model for dictation (continuous transcription).
 
 **Download:** go to https://huggingface.co/ggerganov/whisper.cpp/tree/main and download `ggml-base.bin`.
 
@@ -86,7 +104,8 @@ After downloading, the models directory should look like:
 ```
 models/
 ├── silero_vad_v5.onnx   (~1.8 MB)
-└── ggml-base.bin         (~150 MB)
+├── ggml-tiny.bin         (~75 MB)  — wake word detection
+└── ggml-base.bin         (~150 MB) — dictation
 ```
 
 When the app starts, a banner will show if any models are missing, with the expected path.
@@ -146,7 +165,7 @@ Statuses: `done`, `in-progress`, `planned`, `requires design` (UX/UI must be agr
 | whisper-rs transcription           | done   | Base model (~150MB) as placeholder for both wake word and dictation       |
 | Wake word fuzzy matching (strsim)  | done   | 3 commands: приём, вписывай, готово                                       |
 | Pipeline orchestration (3 threads) | done   | Processing + Transcription + Capture, crossbeam channels                  |
-| Tauri IPC (events + commands)      | done   | start/stop_listening, get_audio_state, test_capture, check_models         |
+| Tauri IPC (events + commands)      | done   | start/stop_listening, test_capture, check_models                          |
 | Model check + banner               | done   | check_models command, platform-aware paths, UI banner when models missing |
 | Frontend state sync                | done   | Pinia store + Tauri event listeners                                       |
 | Basic pulse indicator              | done   | Pulse animation when not idle                                             |

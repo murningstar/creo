@@ -1,6 +1,8 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
+import { useSettingsStore } from '~/entities/settings';
+
 import type {
     AudioErrorEvent,
     AudioStateEvent,
@@ -30,7 +32,8 @@ export const useAudioStore = defineStore('audio', () => {
     const isProcessing = computed<boolean>(() => _mode.value === AudioMode.Processing);
     const isIdle = computed<boolean>(() => _mode.value === AudioMode.Idle);
 
-    const _setMode = (newMode: AudioMode) => {
+    /** DEV ONLY: sets frontend mode without Tauri IPC — backend state will NOT change. */
+    const __devSetMode = (newMode: AudioMode) => {
         _mode.value = newMode;
     };
 
@@ -78,15 +81,32 @@ export const useAudioStore = defineStore('audio', () => {
             listen<VadStateEvent>('vad-state', event => {
                 _isSpeech.value = event.payload.isSpeech;
             }),
-            listen<TranscriptionEvent>('transcription', event => {
+            listen<TranscriptionEvent>('transcription', async event => {
                 _lastTranscription.value = event.payload.text;
+
+                // Inject text into active app when dictation produces final result
+                if (event.payload.isFinal && _mode.value === AudioMode.Dictation) {
+                    try {
+                        const settings = useSettingsStore();
+                        await invoke('inject_text', {
+                            text: event.payload.text,
+                            method: settings.textInputMethod,
+                        });
+                    } catch (e) {
+                        _error.value = `Injection failed: ${String(e)}`;
+                        console.error('Text injection error:', e);
+                    }
+                }
             }),
             listen<WakeCommandEvent>('wake-command', event => {
                 console.log('Wake command:', event.payload.command);
             }),
-            listen<AudioErrorEvent>('error', event => {
+            listen<AudioErrorEvent>('audio-error', event => {
                 _error.value = event.payload.message;
                 console.error('Audio error:', event.payload.message);
+            }),
+            listen<ModelStatus>('models-status-changed', event => {
+                _modelStatus.value = event.payload;
             }),
         ]);
 
@@ -116,6 +136,6 @@ export const useAudioStore = defineStore('audio', () => {
         testCapture,
         setupEventListeners,
         cleanup,
-        _setMode,
+        __devSetMode,
     };
 });

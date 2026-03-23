@@ -59,117 +59,21 @@
 
 ## Audio Pipeline Architecture
 
-```
-Микрофон (cpal, always-on)
-    │
-    ▼
-Silero VAD (~1.8MB ONNX, always-on, <1% CPU)
-    │ речь обнаружена
-    ▼
-Буфер 2-3 сек аудио
-    │
-    ▼
-whisper-rs tiny (~75MB GGML, CPU burst ~0.2s)
-    │ fuzzy match "Крео, приём/вписывай/готово"
-    │
-    ├─ "Крео, приём" → Tauri IPC → frontend: command mode
-    │   → Запуск Kando (MVP)
-    │
-    ├─ "Крео, вписывай" → Tauri IPC → frontend: dictation mode
-    │   → Прогрев основного STT (ct2rs или parakeet-rs)
-    │   → Непрерывная транскрипция → enigo → ввод текста
-    │
-    ├─ "Крео, готово" → Tauri IPC → frontend: stop dictation
-    │   → Остановка STT, финализация текста
-    │
-    └─ Нет совпадения → discard, возврат к VAD listening
-```
+> **Details:** [`.claude/docs/audio-pipeline.md`](.claude/docs/audio-pipeline.md) — pipeline diagram, models table, GPU compatibility, auto-configuration.
 
-### Модели (скачиваются при первом запуске)
-
-| Модель                       | Назначение               | Размер      | Формат      |
-| ---------------------------- | ------------------------ | ----------- | ----------- |
-| Silero VAD                   | Voice Activity Detection | ~1.8 MB     | ONNX        |
-| Whisper tiny                 | Wake word detection      | ~75 MB      | GGML        |
-| Whisper small/large-v3-turbo | Main STT (CTranslate2)   | 500MB-1.5GB | CTranslate2 |
-| Parakeet TDT 0.6B            | Main STT (альтернатива)  | ~600 MB     | ONNX        |
-
-### GPU Compatibility
-
-| GPU                    | CTranslate2 (ct2rs) | whisper.cpp (whisper-rs) | Parakeet (ONNX Runtime) |
-| ---------------------- | ------------------- | ------------------------ | ----------------------- |
-| NVIDIA (CUDA)          | ✓                   | ✓                        | ✓                       |
-| AMD (Windows/DirectML) | ✗                   | ✓ (Vulkan)               | ✓                       |
-| AMD (Linux/ROCm)       | ✗                   | ✓ (Vulkan)               | ✓                       |
-| Intel iGPU             | ✗                   | ✓ (Vulkan)               | ✓ (DirectML/OpenVINO)   |
-| CPU only               | ✓ (int8)            | ✓                        | ✓                       |
-
-### Auto-Configuration (первый запуск)
-
-1. Определяем GPU (vendor, VRAM), CPU, RAM
-2. Подбираем оптимальный движок + модель + квантизацию
-3. Показываем пользователю в понятном виде (без технических деталей)
-4. Пользователь может переопределить выбор
+Краткая схема: Микрофон (cpal) → Silero VAD (ort/ONNX) → speech buffer → whisper-rs → fuzzy wake word match / dictation text → Tauri events → Vue frontend. Три потока: capture, VAD processing, whisper transcription.
 
 ---
 
 ## Platform-Specific Considerations
 
-### Windows
-
-- **UIPI:** non-elevated процесс не может вводить текст в elevated окна → рекомендуем запуск от admin, баннер если нет
-- **Кириллица в путях:** `C:\Users\я\` ломает fopen() в C/C++ библиотеках → модели/кэш всегда в ASCII-путях (`C:\creo-data\`)
-- **Установщик (NSIS):** предупреждение о non-ASCII путях, рекомендация "Для всех пользователей" (Program Files)
-- **Text injection:** SendInput + KEYEVENTF_UNICODE (enigo)
-
-### Linux
-
-- **Wayland:** ввод текста через enigo экспериментален → fallback на clipboard+paste
-- **X11:** XTest работает без проблем
-- **Tray:** зависит от DE, не все Wayland DE поддерживают
-- **Пути:** UTF-8 нативно, проблем нет
-
-### macOS (будущее)
-
-- **Accessibility permission** обязателен для input injection
-- **Microphone permission** обязателен
-- **Notarization** для распространения
-- **Metal** для GPU ускорения
+> **Details:** [`.claude/docs/platform.md`](.claude/docs/platform.md) — Windows (UIPI, Cyrillic paths, NSIS), Linux (Wayland/X11), macOS (future).
 
 ---
 
 ## UX Requirements
 
-### Visual Feedback
-
-- **Начало записи:** пульс-волна (circle) расширяющаяся от индикатора на весь экран — привлекает периферийное зрение
-- **Во время диктовки:** компактный circular waveform индикатор (не широкий прямоугольник)
-- **Idle:** еле заметный индикатор (как в OpenWhispr)
-
-### Overlay Indicator (отдельное окно)
-
-- Отдельное Tauri окно: AlwaysOnTop, fullscreen, полностью прозрачный фон
-- Вся область click-through (прокликивается насквозь к приложениям под ним)
-- Пульс/волна при старте записи видна периферийным зрением, не мешает работе
-- Tauri window options: `transparent`, `decorations: false`, `always_on_top`, `ignore_cursor_events`
-
-### Banners / Guides
-
-- Admin elevation (Windows) — последствия работы без admin
-- Модели — гайд выбора при первом запуске
-- Кириллица в путях (Windows) — предупреждение + автофикс
-- Wayland limitations (Linux) — оповещение о fallback
-
-### Text Input (enigo)
-
-- < 100 символов: SendInput (не засоряет clipboard)
-- ≥ 100 символов: save clipboard → paste → restore clipboard
-- Настройка в settings: auto / always type / always paste
-
-### History
-
-- Настраиваемый retention (дни)
-- Доступна из настроек и при первом старте
+> **Details:** [`.claude/docs/ux-requirements.md`](.claude/docs/ux-requirements.md) — visual feedback, overlay indicator, banners, text input, history.
 
 ---
 
@@ -231,6 +135,24 @@ src/
 
 - PascalCase: `AudioMode`, `CurrentNativePlatform`, `WakeCommand`
 
+### Rust Backend (src-tauri/)
+
+**Tauri events (Rust → Frontend):**
+
+- Именование: `audio-state-changed`, `vad-state`, `transcription`, `wake-command`, `audio-error`
+- Ошибки аудио-пайплайна — событие `audio-error` (НЕ generic `error`)
+
+**PipelineHandle (managed state):**
+
+- Поля приватные, доступ только через методы
+- `transition_mode(app, new_mode)` — единственный способ менять mode (атомарно: set + emit). Прямая запись в mode запрещена — гарантирует sync между Rust и frontend
+- `join_threads()`, `push_thread()` — safe mutex access (без unwrap, через map_err)
+
+**Domain types:**
+
+- Все payload/model структуры (`AudioMode`, `ModelInfo`, `ModelStatus`, `WakeCommand`, etc.) живут в `audio/mod.rs`
+- `commands.rs` — только Tauri command handlers + platform-specific logic (`get_models_dir`)
+
 ### File Structure per Segment
 
 ```
@@ -291,7 +213,7 @@ pnpm format          # Prettier
 ## Important Notes
 
 - SSR отключен — приложение работает как SPA
-- Tauri конфиги: `tauri.conf.json5`, `tauri.windows.conf.json5`, `tauri.linux.conf.json5`
+- Tauri конфиги: `tauri.conf.json5` (base), `tauri.windows.conf.json5`, `tauri.linux.conf.json5`. **Platform конфиги — delta-only** (содержат только overrides, Tauri 2 deep-мержит поверх base)
 - Tauri window: 400x600 (компактный формат для voice assistant)
 - Auto-import компонентов из shared с префиксом `c-`
 - Layouts в `shared/ui/layouts`
