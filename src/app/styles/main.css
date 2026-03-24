@@ -1,2 +1,24 @@
 @import 'tailwindcss';
 @import '@nuxt/ui';
+
+@theme static {
+    --color-creo-50: #f4f9fd;
+    --color-creo-100: #e6f2f9;
+    --color-creo-200: #cde4f2;
+    --color-creo-300: #b4d6eb;
+    --color-creo-400: #9cc8dc;
+    --color-creo-500: #7cb4ca;
+    --color-creo-600: #3d6d85;
+    --color-creo-700: #2e5468;
+    --color-creo-800: #234250;
+    --color-creo-900: #1c3640;
+    --color-creo-950: #12232b;
+}
+
+@utility shadow-card {
+    box-shadow: 0 8px 36px rgba(0, 0, 0, 0.1);
+}
+
+@utility shadow-card-hover {
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.14);
+}

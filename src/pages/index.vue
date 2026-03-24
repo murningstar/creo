@@ -1,31 +1,36 @@
 <template>
-    <div class="flex grow flex-col gap-4 overflow-y-auto p-4">
-        <!-- Models missing banner -->
-        <div
+    <div class="flex grow flex-col gap-8 overflow-y-auto p-4">
+        <!-- Models missing alert -->
+        <u-alert
             v-if="audioStore.modelStatus && !audioStore.modelStatus.allPresent"
-            class="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-900/20"
+            icon="i-lucide-alert-triangle"
+            color="warning"
+            variant="soft"
+            title="Models required"
         >
-            <p class="mb-2 text-sm font-medium text-amber-800 dark:text-amber-200">Models required</p>
-            <p class="mb-2 text-xs text-amber-700 dark:text-amber-300">Place model files in:</p>
-            <code class="mb-3 block rounded bg-amber-100 px-2 py-1 text-xs break-all dark:bg-amber-900/40">
-                {{ audioStore.modelStatus.modelsDir }}
-            </code>
-            <ul class="space-y-1">
-                <li
-                    v-for="model in audioStore.modelStatus.models"
-                    :key="model.filename"
-                    class="flex items-center gap-2 text-xs"
-                >
-                    <span
-                        :class="model.exists ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
+            <template #description>
+                <p class="mb-2">Place model files in:</p>
+                <code class="bg-muted block rounded px-2 py-1 text-xs break-all">
+                    {{ audioStore.modelStatus.modelsDir }}
+                </code>
+                <ul class="mt-2 space-y-1">
+                    <li
+                        v-for="model in audioStore.modelStatus.models"
+                        :key="model.filename"
+                        class="flex items-center gap-2 text-xs"
                     >
-                        {{ model.exists ? 'OK' : 'Missing' }}
-                    </span>
-                    <span class="text-amber-700 dark:text-amber-300">{{ model.filename }}</span>
-                    <span class="text-amber-500 dark:text-amber-400">({{ model.sizeHint }})</span>
-                </li>
-            </ul>
-        </div>
+                        <u-badge
+                            :color="model.exists ? 'success' : 'error'"
+                            :variant="model.exists ? 'soft' : 'solid'"
+                            :label="model.exists ? 'OK' : 'Missing'"
+                            size="xs"
+                        />
+                        <span>{{ model.filename }}</span>
+                        <span class="text-dimmed">({{ model.sizeHint }})</span>
+                    </li>
+                </ul>
+            </template>
+        </u-alert>
 
         <!-- Status bar -->
         <div class="flex items-center gap-4">
@@ -43,8 +48,8 @@
                 </div>
             </div>
             <div class="flex-1">
-                <p class="text-sm font-medium">{{ stateLabel }}</p>
-                <p class="text-xs text-neutral-500">{{ stateDescription }}</p>
+                <p class="text-highlighted text-sm font-medium">{{ stateLabel }}</p>
+                <p class="text-muted text-xs">{{ stateDescription }}</p>
             </div>
             <u-button
                 v-if="audioStore.isIdle"
@@ -60,18 +65,22 @@
             </u-button>
         </div>
 
-        <!-- Error display -->
-        <div v-if="audioStore.error" class="rounded-lg bg-red-50 p-3 dark:bg-red-900/20">
-            <p class="text-sm text-red-600 dark:text-red-400">{{ audioStore.error }}</p>
-        </div>
+        <!-- Error alert -->
+        <u-alert
+            v-if="audioStore.error"
+            icon="i-lucide-circle-x"
+            color="error"
+            variant="soft"
+            :description="audioStore.error"
+        />
 
         <!-- Two-column layout -->
-        <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div class="grid grid-cols-1 gap-8 md:grid-cols-2">
             <!-- Voice Commands -->
-            <div class="rounded-lg border border-neutral-200 p-4 dark:border-neutral-700">
-                <div class="mb-3 flex items-center justify-between">
-                    <p class="text-sm font-medium">Voice Commands</p>
-                    <u-button v-if="!isCreating" size="xs" variant="soft" @click="startCreating"> + New </u-button>
+            <section class="shadow-card rounded-lg bg-white p-5 dark:bg-neutral-900">
+                <div class="mb-4 flex items-center justify-between">
+                    <h2 class="text-highlighted text-sm font-semibold">Voice Commands</h2>
+                    <u-button v-if="!isCreating" size="xs" variant="soft" @click="startCreating">+ New</u-button>
                 </div>
 
                 <!-- Command list -->
@@ -79,21 +88,18 @@
                     <div
                         v-for="cmd in wakeStore.commands"
                         :key="cmd.name"
-                        class="flex items-center justify-between rounded-md bg-neutral-50 px-3 py-2 dark:bg-neutral-800"
+                        class="bg-muted flex items-center justify-between rounded-md px-3 py-2"
                     >
                         <div>
                             <p class="text-sm font-medium">{{ cmd.name }}</p>
-                            <p
-                                class="text-xs"
-                                :class="
-                                    cmd.sampleCount >= 3
-                                        ? 'text-green-600 dark:text-green-400'
-                                        : 'text-amber-600 dark:text-amber-400'
-                                "
-                            >
-                                {{ cmd.sampleCount }}/3 samples
-                                <span v-if="cmd.sampleCount < 3"> — needs more</span>
-                            </p>
+                            <div class="mt-0.5">
+                                <u-badge
+                                    :color="cmd.sampleCount >= 3 ? 'success' : 'warning'"
+                                    variant="soft"
+                                    :label="`${cmd.sampleCount}/3 samples${cmd.sampleCount < 3 ? ' — needs more' : ''}`"
+                                    size="xs"
+                                />
+                            </div>
                         </div>
                         <div class="flex gap-1">
                             <u-button size="xs" variant="ghost" color="primary" @click="openEditor(cmd.name)">
@@ -111,39 +117,26 @@
                     </div>
                 </div>
 
-                <p v-if="!wakeStore.hasCommands && !isCreating" class="py-4 text-center text-sm text-neutral-500">
+                <p v-if="!wakeStore.hasCommands && !isCreating" class="text-muted py-4 text-center text-sm">
                     No commands yet. Create one to start.
                 </p>
 
                 <!-- Create / Edit command -->
-                <div
-                    v-if="isCreating"
-                    class="mt-3 space-y-3 rounded-md border border-neutral-200 p-3 dark:border-neutral-600"
-                >
-                    <!-- Command name input (only for new) -->
+                <div v-if="isCreating" class="bg-muted mt-4 space-y-4 rounded-md p-4">
                     <div v-if="!editingExisting">
-                        <label class="mb-1 block text-xs font-medium text-neutral-600 dark:text-neutral-400">
-                            Command name
-                        </label>
-                        <u-input v-model="newCommandName" size="sm" placeholder="e.g. Приём" />
+                        <u-form-field label="Command name" class="mb-3">
+                            <u-input v-model="newCommandName" size="sm" placeholder="e.g. Приём" />
+                        </u-form-field>
 
-                        <label class="mt-2 mb-1 block text-xs font-medium text-neutral-600 dark:text-neutral-400">
-                            Action
-                        </label>
-                        <select
-                            v-model="selectedAction"
-                            class="w-full rounded-md border border-neutral-300 bg-white px-2 py-1.5 text-sm dark:border-neutral-600 dark:bg-neutral-800"
-                        >
-                            <option v-for="opt in WAKE_ACTION_OPTIONS" :key="opt.value" :value="opt.value">
-                                {{ opt.label }} — {{ opt.description }}
-                            </option>
-                        </select>
+                        <u-form-field label="Action">
+                            <u-select v-model="selectedAction" :items="actionOptions" />
+                        </u-form-field>
                     </div>
-                    <p v-else class="text-sm font-medium">{{ newCommandName }}</p>
+                    <p v-else class="text-highlighted text-sm font-medium">{{ newCommandName }}</p>
 
                     <!-- Recording section -->
                     <div v-if="newCommandName.trim()">
-                        <p class="mb-2 text-xs text-neutral-500">
+                        <p class="text-muted mb-2 text-xs">
                             <template v-if="currentSamples.length === 0">
                                 Say "{{ newCommandName }}" clearly when ready.
                             </template>
@@ -153,45 +146,43 @@
                                 }}
                                 needed.
                             </template>
-                            <template v-else> Enough samples recorded. You can add more for better accuracy. </template>
+                            <template v-else>Enough samples recorded. You can add more for better accuracy.</template>
                         </p>
 
                         <!-- Sample list -->
                         <!-- TODO: add audio playback (inline waveform + play button) per sample -->
-                        <div v-if="currentSamples.length > 0" class="mb-2 space-y-1">
+                        <div v-if="currentSamples.length > 0" class="mb-3 space-y-1">
                             <div
                                 v-for="(sample, idx) in currentSamples"
                                 :key="idx"
-                                class="flex items-center gap-2 rounded bg-neutral-50 px-2 py-1 text-xs dark:bg-neutral-800"
+                                class="bg-elevated flex items-center gap-2 rounded px-2 py-1 text-xs"
                             >
-                                <span class="font-medium text-neutral-600 dark:text-neutral-400"> #{{ idx + 1 }} </span>
-                                <span class="flex-1 text-neutral-500"> {{ sample.embeddingCount }} embeddings </span>
-                                <!-- TODO: play button + waveform here -->
+                                <u-badge color="neutral" variant="subtle" :label="`#${idx + 1}`" size="xs" />
+                                <span class="text-dimmed flex-1">{{ sample.embeddingCount }} embeddings</span>
                             </div>
                         </div>
 
-                        <!-- Record button -->
                         <u-button
                             size="sm"
                             :color="wakeStore.isRecording ? 'error' : 'primary'"
                             :disabled="wakeStore.isRecording"
+                            :icon="wakeStore.isRecording ? 'i-lucide-mic' : 'i-lucide-mic'"
                             @click="recordSample"
                         >
-                            <template v-if="wakeStore.isRecording">
-                                <u-icon name="i-heroicons-microphone" class="mr-1 size-4 animate-pulse" />
-                                Listening...
-                            </template>
-                            <template v-else>
-                                <u-icon name="i-heroicons-microphone" class="mr-1 size-4" />
-                                Record Sample
-                            </template>
+                            {{ wakeStore.isRecording ? 'Listening...' : 'Record Sample' }}
                         </u-button>
                     </div>
 
-                    <p v-if="wakeStore.error" class="text-xs text-red-500">{{ wakeStore.error }}</p>
+                    <u-alert
+                        v-if="wakeStore.error"
+                        icon="i-lucide-circle-x"
+                        color="error"
+                        variant="soft"
+                        :description="wakeStore.error"
+                        class="mt-2"
+                    />
 
-                    <!-- Actions -->
-                    <div class="flex justify-end gap-2 border-t border-neutral-200 pt-3 dark:border-neutral-600">
+                    <div class="border-default flex justify-end gap-2 border-t pt-3">
                         <u-button size="xs" variant="ghost" @click="cancelCreating">Cancel</u-button>
                         <u-button
                             size="xs"
@@ -203,25 +194,23 @@
                         </u-button>
                     </div>
                 </div>
-            </div>
+            </section>
 
             <!-- Dictation History -->
-            <div class="rounded-lg border border-neutral-200 p-4 dark:border-neutral-700">
-                <p class="mb-3 text-sm font-medium">Dictation History</p>
+            <section class="shadow-card rounded-lg bg-white p-5 dark:bg-neutral-900">
+                <h2 class="text-highlighted mb-4 text-sm font-semibold">Dictation History</h2>
 
-                <div v-if="audioStore.lastTranscription" class="rounded-md bg-neutral-50 p-3 dark:bg-neutral-800">
-                    <p class="text-sm text-neutral-600 dark:text-neutral-300">
-                        {{ audioStore.lastTranscription }}
-                    </p>
+                <div v-if="audioStore.lastTranscription" class="bg-muted rounded-md p-3">
+                    <p class="text-sm">{{ audioStore.lastTranscription }}</p>
                 </div>
 
-                <p v-else class="py-4 text-center text-sm text-neutral-500">No dictations yet.</p>
-            </div>
+                <p v-else class="text-muted py-4 text-center text-sm">No dictations yet.</p>
+            </section>
         </div>
 
         <!-- Dev controls -->
-        <div v-if="isDev" class="rounded-lg border border-dashed border-neutral-300 p-3 dark:border-neutral-600">
-            <p class="mb-2 text-xs font-medium tracking-wide text-neutral-400 uppercase">Dev Controls</p>
+        <div v-if="isDev" class="border-accented rounded-lg border border-dashed p-3">
+            <p class="text-dimmed mb-2 text-xs font-medium tracking-wide uppercase">Dev Controls</p>
             <div class="flex flex-wrap gap-2">
                 <u-button
                     v-for="m in modes"
@@ -233,12 +222,12 @@
                 >
                     {{ m.label }}
                 </u-button>
-                <u-button size="xs" variant="soft" color="neutral" @click="runTestCapture"> Test Capture </u-button>
+                <u-button size="xs" variant="soft" color="neutral" @click="runTestCapture">Test Capture</u-button>
             </div>
-            <p v-if="testResult" class="mt-2 text-xs whitespace-pre-wrap text-neutral-500">{{ testResult }}</p>
+            <p v-if="testResult" class="text-dimmed mt-2 text-xs whitespace-pre-wrap">{{ testResult }}</p>
         </div>
 
-        <div class="text-center text-xs text-neutral-400">{{ platformLabel }}</div>
+        <div class="text-dimmed text-center text-xs">{{ platformLabel }}</div>
     </div>
 </template>
 
@@ -261,7 +250,6 @@
     const isDev = import.meta.dev;
     const testResult = ref<string | null>(null);
 
-    // Command creation state
     const isCreating = ref(false);
     const editingExisting = ref(false);
     const newCommandName = ref('');
@@ -275,16 +263,18 @@
         { value: AudioMode.Processing, label: 'Processing' },
     ] as const;
 
-    const canStart = computed(() => {
-        const modelsOk = !audioStore.modelStatus || audioStore.modelStatus.allPresent;
-        return modelsOk;
-    });
+    const actionOptions = WAKE_ACTION_OPTIONS.map(opt => ({
+        label: `${opt.label} — ${opt.description}`,
+        value: opt.value,
+    }));
+
+    const canStart = computed(() => !audioStore.modelStatus || audioStore.modelStatus.allPresent);
 
     const stateConfig = computed(() => {
         switch (audioStore.mode) {
             case AudioMode.Listening:
                 return {
-                    icon: 'i-heroicons-microphone',
+                    icon: 'i-lucide-mic',
                     label: 'Listening...',
                     description: 'Waiting for wake word',
                     circle: 'bg-blue-500',
@@ -292,7 +282,7 @@
                 };
             case AudioMode.Dictation:
                 return {
-                    icon: 'i-heroicons-pencil-square',
+                    icon: 'i-lucide-pencil',
                     label: 'Dictation',
                     description: 'Say stop command to finish',
                     circle: 'bg-green-500',
@@ -300,7 +290,7 @@
                 };
             case AudioMode.Processing:
                 return {
-                    icon: 'i-heroicons-arrow-path',
+                    icon: 'i-lucide-loader',
                     label: 'Processing...',
                     description: 'Recognizing speech',
                     circle: 'bg-amber-500',
@@ -308,7 +298,7 @@
                 };
             default:
                 return {
-                    icon: 'i-heroicons-speaker-wave',
+                    icon: 'i-lucide-audio-lines',
                     label: 'Creo',
                     description: 'Voice assistant',
                     circle: 'bg-neutral-700',
@@ -340,11 +330,10 @@
         isCreating.value = true;
         editingExisting.value = true;
         newCommandName.value = commandName;
-        // Load existing sample count
         const cmd = wakeStore.commands.find(c => c.name === commandName);
         currentSamples.value = Array.from({ length: cmd?.sampleCount ?? 0 }, (_, i) => ({
             commandName,
-            embeddingCount: 0, // Unknown for existing samples
+            embeddingCount: 0,
             totalSamples: cmd?.sampleCount ?? 0,
             path: `sample_${i}`,
         }));
@@ -353,7 +342,6 @@
     async function recordSample() {
         const name = newCommandName.value.trim();
         if (!name) return;
-        // Pass action only on first sample (saves mapping once)
         const action = currentSamples.value.length === 0 ? selectedAction.value : undefined;
         const result = await wakeStore.recordSample(name, action);
         if (result) {
@@ -369,8 +357,6 @@
     }
 
     function saveCommand() {
-        // Samples are already saved on disk by record_wake_sample.
-        // Just close the editor and refresh.
         wakeStore.loadCommands();
         cancelCreating();
     }

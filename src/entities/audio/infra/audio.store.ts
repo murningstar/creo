@@ -108,6 +108,25 @@ export const useAudioStore = defineStore('audio', () => {
             listen<ModelStatus>('models-status-changed', event => {
                 _modelStatus.value = event.payload;
             }),
+            // Hotkey: hold-to-talk (default mode)
+            listen('hotkey-pressed', async () => {
+                if (_mode.value === AudioMode.Idle) {
+                    try {
+                        await invoke('start_listening');
+                    } catch (e) {
+                        _error.value = String(e);
+                    }
+                }
+            }),
+            listen('hotkey-released', async () => {
+                if (_mode.value !== AudioMode.Idle) {
+                    try {
+                        await invoke('stop_listening');
+                    } catch (e) {
+                        _error.value = String(e);
+                    }
+                }
+            }),
         ]);
 
         _unlisten.value = listeners;

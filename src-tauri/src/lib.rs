@@ -6,14 +6,43 @@ mod system;
 use std::sync::Arc;
 
 use tauri::Emitter;
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Default hotkey: Ctrl+` (backtick)
+    // Chosen for: no conflicts on any platform, no Shift (avoids RU layout switch),
+    // available on all keyboards. See .claude/docs/hotkeys/cross-platform-summary.md
+    let default_hotkey = Shortcut::new(Some(Modifiers::CONTROL), Code::Backquote);
+
     tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_store::Builder::new().build())
         .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_shortcut(default_hotkey)
+                .unwrap_or_else(|e| {
+                    log::error!("Failed to register default hotkey: {}", e);
+                    tauri_plugin_global_shortcut::Builder::new()
+                })
+                .with_handler(move |app, shortcut, event| {
+                    if shortcut == &default_hotkey {
+                        match event.state() {
+                            ShortcutState::Pressed => {
+                                log::info!("Hotkey pressed");
+                                let _ = app.emit("hotkey-pressed", ());
+                            }
+                            ShortcutState::Released => {
+                                log::info!("Hotkey released");
+                                let _ = app.emit("hotkey-released", ());
+                            }
+                        }
+                    }
+                })
+                .build(),
+        )
         .manage(Arc::new(audio::PipelineHandle::new()))
         .invoke_handler(tauri::generate_handler![
             commands::start_listening,

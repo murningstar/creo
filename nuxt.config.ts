@@ -21,6 +21,10 @@ export default defineNuxtConfig(
 
             modules: ['@nuxt/eslint', '@nuxt/ui', '@pinia/nuxt', '@vueuse/nuxt'],
 
+            colorMode: {
+                preference: 'light',
+            },
+
             vite: {
                 plugins: [tailwindcss()],
             },

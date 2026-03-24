@@ -10,6 +10,9 @@
         "fs:allow-resource-read-recursive",
         "fs:default",
         "store:default",
-        "window-state:default"
+        "window-state:default",
+        "global-shortcut:allow-register",
+        "global-shortcut:allow-unregister",
+        "global-shortcut:allow-is-registered"
     ]
 }
