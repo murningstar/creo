@@ -22,13 +22,14 @@ const TRANSCRIPTION_CHANNEL_CAPACITY: usize = 4;
 pub fn start_pipeline(
     app_handle: AppHandle,
     handle: Arc<PipelineHandle>,
+    initial_mode: AudioMode,
     vad_model_path: String,
     mel_model_path: String,
     emb_model_path: String,
     wakewords_dir: String,
     dictation_model_path: String,
 ) -> Result<()> {
-    handle.transition_mode(&app_handle, AudioMode::Listening);
+    handle.transition_mode(&app_handle, initial_mode);
 
     // Channels between processing ↔ transcription threads
     let (trans_tx, trans_rx): (Sender<TranscriptionRequest>, Receiver<TranscriptionRequest>) =

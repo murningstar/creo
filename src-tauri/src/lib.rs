@@ -46,6 +46,7 @@ pub fn run() {
         .manage(Arc::new(audio::PipelineHandle::new()))
         .invoke_handler(tauri::generate_handler![
             commands::start_listening,
+            commands::start_dictation,
             commands::stop_listening,
             commands::test_capture,
             commands::check_models,

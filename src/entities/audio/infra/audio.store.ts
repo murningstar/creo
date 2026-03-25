@@ -1,8 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
-import { useSettingsStore } from '~/entities/settings';
-
 import type {
     AudioErrorEvent,
     AudioStateEvent,
@@ -81,22 +79,8 @@ export const useAudioStore = defineStore('audio', () => {
             listen<VadStateEvent>('vad-state', event => {
                 _isSpeech.value = event.payload.isSpeech;
             }),
-            listen<TranscriptionEvent>('transcription', async event => {
+            listen<TranscriptionEvent>('transcription', event => {
                 _lastTranscription.value = event.payload.text;
-
-                // Inject text into active app when dictation produces final result
-                if (event.payload.isFinal && _mode.value === AudioMode.Dictation) {
-                    try {
-                        const settings = useSettingsStore();
-                        await invoke('inject_text', {
-                            text: event.payload.text,
-                            method: settings.textInputMethod,
-                        });
-                    } catch (e) {
-                        _error.value = `Injection failed: ${String(e)}`;
-                        console.error('Text injection error:', e);
-                    }
-                }
             }),
             listen<WakeCommandEvent>('wake-command', event => {
                 console.log('Wake command:', event.payload.command);
@@ -107,25 +91,6 @@ export const useAudioStore = defineStore('audio', () => {
             }),
             listen<ModelStatus>('models-status-changed', event => {
                 _modelStatus.value = event.payload;
-            }),
-            // Hotkey: hold-to-talk (default mode)
-            listen('hotkey-pressed', async () => {
-                if (_mode.value === AudioMode.Idle) {
-                    try {
-                        await invoke('start_listening');
-                    } catch (e) {
-                        _error.value = String(e);
-                    }
-                }
-            }),
-            listen('hotkey-released', async () => {
-                if (_mode.value !== AudioMode.Idle) {
-                    try {
-                        await invoke('stop_listening');
-                    } catch (e) {
-                        _error.value = String(e);
-                    }
-                }
             }),
         ]);
 

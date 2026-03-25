@@ -77,15 +77,12 @@ pub fn check_models() -> ModelStatus {
     }
 }
 
-#[tauri::command]
-pub fn start_listening(
+/// Shared pipeline startup logic: resolve model paths, validate, start pipeline in given mode.
+fn start_pipeline_with_mode(
     app: AppHandle,
-    state: State<'_, Arc<PipelineHandle>>,
+    state: &Arc<PipelineHandle>,
+    initial_mode: AudioMode,
 ) -> Result<(), String> {
-    if state.current_mode() != AudioMode::Idle {
-        return Err("Pipeline already running".to_string());
-    }
-
     let dir = get_models_dir();
     let vad_path = dir.join(VAD_MODEL_FILENAME);
     let mel_path = dir.join(MEL_MODEL_FILENAME);
@@ -109,7 +106,8 @@ pub fn start_listening(
 
     pipeline::start_pipeline(
         app,
-        state.inner().clone(),
+        state.clone(),
+        initial_mode,
         vad_path.to_string_lossy().to_string(),
         mel_path.to_string_lossy().to_string(),
         emb_path.to_string_lossy().to_string(),
@@ -117,6 +115,28 @@ pub fn start_listening(
         dictation_path.to_string_lossy().to_string(),
     )
     .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn start_listening(
+    app: AppHandle,
+    state: State<'_, Arc<PipelineHandle>>,
+) -> Result<(), String> {
+    if state.current_mode() != AudioMode::Idle {
+        return Err("Pipeline already running".to_string());
+    }
+    start_pipeline_with_mode(app, state.inner(), AudioMode::Listening)
+}
+
+#[tauri::command]
+pub fn start_dictation(
+    app: AppHandle,
+    state: State<'_, Arc<PipelineHandle>>,
+) -> Result<(), String> {
+    if state.current_mode() != AudioMode::Idle {
+        return Err("Pipeline already running".to_string());
+    }
+    start_pipeline_with_mode(app, state.inner(), AudioMode::Dictation)
 }
 
 #[tauri::command]

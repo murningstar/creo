@@ -45,6 +45,7 @@
         'update:modelValue': [combo: KeyCombo];
         'recording-start': [];
         'recording-end': [];
+        cancelled: [];
     }>();
 
     const containerRef = ref<HTMLElement | null>(null);
@@ -161,20 +162,22 @@
             return;
         }
 
-        // Non-modifier key pressed — emit the combo
-        const combo: KeyCombo = {
+        // Escape cancels recording without changing the hotkey
+        if (e.code === 'Escape') {
+            emit('cancelled');
+            containerRef.value?.blur(); // onBlur handles cleanup + recording-end
+            return;
+        }
+
+        // Non-modifier key pressed — emit the combo, blur handles the rest
+        emit('update:modelValue', {
             key: e.key,
             code: e.code,
             ctrl: e.ctrlKey,
             alt: e.altKey,
             shift: e.shiftKey,
             meta: e.metaKey,
-        };
-
-        emit('update:modelValue', combo);
-        recording.value = false;
-        emit('recording-end');
-        heldModifiers.value = new Set();
+        });
         containerRef.value?.blur();
     }
 

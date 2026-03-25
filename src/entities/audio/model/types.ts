@@ -5,14 +5,14 @@ export enum AudioMode {
     Processing = 'processing',
 }
 
-export type WakeCommandName = 'прием' | 'вписывай' | 'готово';
+export type WakeAction = 'command_mode' | 'start_dictation' | 'stop_dictation';
 
 export interface AudioStateEvent {
     mode: AudioMode;
 }
 
 export interface WakeCommandEvent {
-    command: WakeCommandName;
+    command: WakeAction;
 }
 
 export interface TranscriptionEvent {
