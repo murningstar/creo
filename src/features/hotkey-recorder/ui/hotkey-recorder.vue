@@ -50,14 +50,15 @@
 
     watch(issues, value => emit('validation', value));
 
-    // Temporarily unregister global hotkey while recording to prevent interception
+    // Temporarily unregister the current hotkey while recording to prevent interception
     async function onRecordingStart() {
         if (!platformStore.isNativePlatform) return;
         try {
-            const { unregisterAll } = await import('@tauri-apps/plugin-global-shortcut');
-            await unregisterAll();
+            const { unregister } = await import('@tauri-apps/plugin-global-shortcut');
+            const shortcutStr = formatForTauri(props.modelValue);
+            await unregister(shortcutStr);
         } catch {
-            // Not in Tauri context — ignore
+            // Not in Tauri context or shortcut not registered — ignore
         }
     }
 
@@ -82,6 +83,13 @@
         }
     }
 
+    function codeToTauriKey(code: string): string {
+        if (code.startsWith('Key')) return code.slice(3); // KeyA → A
+        if (code.startsWith('Digit')) return code.slice(5); // Digit1 → 1
+        if (code.startsWith('Numpad')) return `Num${code.slice(6)}`; // Numpad0 → Num0
+        return code; // Backquote, F1, Space, ScrollLock, etc.
+    }
+
     function formatForTauri(combo: KeyCombo | null): string {
         if (!combo) return 'Control+Backquote';
         const parts: string[] = [];
@@ -89,7 +97,7 @@
         if (combo.alt) parts.push('Alt');
         if (combo.shift) parts.push('Shift');
         if (combo.meta) parts.push('Super');
-        parts.push(combo.code);
+        parts.push(codeToTauriKey(combo.code));
         return parts.join('+');
     }
 </script>

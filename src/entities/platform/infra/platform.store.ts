@@ -20,6 +20,10 @@ export const usePlatformStore = defineStore('platform', () => {
 
     const isWebBrowser = computed<boolean>(() => !isNativePlatform.value);
 
+    const platformLabel = computed(() =>
+        isNativePlatform.value ? `Platform: ${currentNativePlatform.value}` : 'Platform: Web Browser'
+    );
+
     const __setCurrentNativePlatform = (platform: CurrentNativePlatform) => {
         _currentNativePlatform.value = platform;
     };
@@ -29,6 +33,7 @@ export const usePlatformStore = defineStore('platform', () => {
         isNativePlatform,
         isNativeDesktop,
         isWebBrowser,
+        platformLabel,
         __setCurrentNativePlatform,
     };
 });

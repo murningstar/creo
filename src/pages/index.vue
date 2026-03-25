@@ -155,7 +155,7 @@
             <p v-if="testResult" class="text-dimmed mt-2 text-xs whitespace-pre-wrap">{{ testResult }}</p>
         </div>
 
-        <div class="text-dimmed text-center text-xs">{{ platformLabel }}</div>
+        <div class="text-dimmed text-center text-xs">{{ platformStore.platformLabel }}</div>
     </div>
 </template>
 
@@ -196,7 +196,7 @@
         {
             name: commandName.value.trim(),
             label: commandName.value.trim(),
-            action: commandAction.value,
+            action: isEditing.value ? undefined : commandAction.value,
             requiredSamples: REQUIRED_SAMPLES,
         },
     ]);
@@ -207,11 +207,6 @@
         { value: AudioMode.Dictation, label: 'Dictation' },
         { value: AudioMode.Processing, label: 'Processing' },
     ] as const;
-
-    const platformLabel = computed(() => {
-        if (platformStore.isNativePlatform) return `Platform: ${platformStore.currentNativePlatform}`;
-        return 'Platform: Web Browser';
-    });
 
     function openCreateModal() {
         commandName.value = '';

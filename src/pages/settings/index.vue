@@ -139,7 +139,7 @@
 
         <!-- About -->
         <div class="text-dimmed border-default mt-8 border-t pt-4 text-center text-xs">
-            <p>Creo v0.1.0 · {{ platformLabel }}</p>
+            <p>Creo v0.1.0 · {{ platformStore.platformLabel }}</p>
         </div>
     </div>
 </template>
@@ -181,11 +181,6 @@
         { label: 'Paste', value: 'paste', icon: IPaste },
         { label: 'Type', value: 'type', icon: IKeyboard },
     ];
-
-    const platformLabel = computed(() => {
-        if (platformStore.isNativePlatform) return `Platform: ${platformStore.currentNativePlatform}`;
-        return 'Platform: Web Browser';
-    });
 
     function onInputMethodChange(value: string | number) {
         settingsStore.setTextInputMethod(String(value) as TextInputMethod);
