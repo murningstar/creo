@@ -1,7 +1,22 @@
 <template>
-    <div class="flex min-h-screen flex-col">
+    <div class="flex h-screen flex-col overflow-y-auto" style="scrollbar-gutter: stable">
         <header class="shrink-0 p-4 pb-0">
-            <CAppHeader />
+            <div class="flex items-center gap-3">
+                <slot name="voice-status" />
+
+                <!-- Navigation -->
+                <div class="flex flex-1 justify-center">
+                    <u-tabs
+                        :model-value="currentTab"
+                        :items="tabs"
+                        :content="false"
+                        :ui="{ root: 'w-fit' }"
+                        variant="link"
+                        size="xl"
+                        @update:model-value="navigate"
+                    />
+                </div>
+            </div>
         </header>
         <main class="relative flex grow flex-col">
             <slot />
@@ -10,5 +25,17 @@
 </template>
 
 <script setup lang="ts">
-    import CAppHeader from '~/shared/ui/app-header/app-header.vue';
+    const route = useRoute();
+    const router = useRouter();
+
+    const tabs = [
+        { label: 'Creo', value: '/', icon: 'i-lucide-layout-dashboard' },
+        { label: 'Settings', value: '/settings', icon: 'i-lucide-settings' },
+    ];
+
+    const currentTab = computed(() => route.path);
+
+    function navigate(value: string | number) {
+        router.push(String(value));
+    }
 </script>

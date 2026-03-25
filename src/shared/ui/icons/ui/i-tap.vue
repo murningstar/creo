@@ -15,6 +15,6 @@
 
 <script lang="ts">
     export default {
-        name: 'MingcuteFingerPressFill',
+        name: 'ITap',
     };
 </script>

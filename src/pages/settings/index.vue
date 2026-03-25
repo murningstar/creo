@@ -1,123 +1,157 @@
 <template>
     <div class="flex grow flex-col gap-8 overflow-y-auto p-4">
-        <!-- Dictation -->
-        <section class="shadow-card rounded-lg bg-white p-7 dark:bg-neutral-900">
-            <h2 class="text-highlighted mb-6 text-sm font-semibold">Dictation Hotkey</h2>
+        <RenameAssistant />
 
-            <div class="space-y-7">
-                <!-- Hotkey -->
-                <u-form-field label="Hotkey" description="Global shortcut to start/stop dictation from any app.">
-                    <template #default>
-                        <u-alert icon="i-lucide-info" color="info" variant="soft" title="Tip" class="mb-2">
-                            <template #description>
-                                If your keyboard has <u-kbd>Scroll Lock</u-kbd> or <u-kbd>Pause</u-kbd> keys, consider
-                                binding the hotkey to one of them for single-key activation.
+        <div class="grid gap-8" style="grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr))">
+            <!-- Dictation Hotkey -->
+            <section class="shadow-card rounded-lg bg-white p-7 dark:bg-neutral-900">
+                <div class="max-w-[26rem]">
+                    <h2 class="text-highlighted text-sm font-semibold">Dictation Hotkey</h2>
+                    <p class="text-dimmed mb-6 text-xs">
+                        Fallback for voice dictation command. Primary activation is via wake word.
+                    </p>
+
+                    <div class="space-y-10 pl-7">
+                        <!-- Hotkey -->
+                        <u-form-field
+                            label="Hotkey"
+                            description="Global shortcut to start/stop dictation from any app."
+                        >
+                            <template #default>
+                                <u-alert icon="i-lucide-info" color="info" variant="soft" title="Совет" class="mb-2">
+                                    <template #description>
+                                        Если у вас на клавиатуре есть кнопка
+                                        <span class="inline-block whitespace-nowrap">
+                                            <u-kbd>scroll lock</u-kbd>&nbsp;(&nbsp;<u-kbd variant="subtle">scrlk</u-kbd
+                                            >&nbsp;)
+                                        </span>
+                                        или
+                                        <span class="inline-block whitespace-nowrap">
+                                            <u-kbd>pause break</u-kbd>&nbsp;(&nbsp;<u-kbd variant="subtle">pause</u-kbd
+                                            >&nbsp;) </span
+                                        >, поставьте активацию на них. Активировать одной кнопкой удобнее🙂
+                                    </template>
+                                </u-alert>
+                                <HotkeyRecorder v-model="hotkey" />
                             </template>
-                        </u-alert>
-                        <div class="flex items-center gap-2">
-                            <div class="bg-muted flex w-fit min-w-96 items-center gap-1 rounded-md px-3 py-1.5 text-sm">
-                                <u-kbd size="lg">Ctrl</u-kbd>
-                                <span class="text-dimmed">+</span>
-                                <u-kbd size="lg">`</u-kbd>
-                            </div>
-                            <!-- TODO: implement record shortcut UI -->
-                            <u-button size="xs" variant="soft" disabled>Change</u-button>
-                        </div>
-                    </template>
-                </u-form-field>
+                        </u-form-field>
 
-                <!-- Dicration hotkey mode -->
-                <u-form-field
-                    label="Dicration hotkey mode"
-                    description="Hold: release key to stop. Toggle: press once to start, again to stop."
-                >
-                    <u-tabs
-                        :model-value="hotkeyMode"
-                        :items="hotkeyModeItems"
-                        :content="false"
-                        @update:model-value="hotkeyMode = $event as string"
-                    />
-                </u-form-field>
+                        <!-- Dictation hotkey mode -->
+                        <u-form-field
+                            label="Dictation hotkey mode"
+                            description="Hold: release key to stop. Toggle: press once to start, again to stop."
+                        >
+                            <u-tabs
+                                :model-value="hotkeyMode"
+                                :items="hotkeyModeItems"
+                                :content="false"
+                                @update:model-value="hotkeyMode = $event as string"
+                            />
+                        </u-form-field>
 
-                <!-- Text input method -->
-                <u-form-field label="Text input method">
-                    <template #default>
-                        <u-alert
-                            icon="i-lucide-info"
-                            color="info"
-                            variant="soft"
-                            :title="inputMethodTitle"
-                            :description="inputMethodDescription"
-                            class="mb-2"
-                        />
-                        <u-tabs
-                            :model-value="settingsStore.textInputMethod"
-                            :items="inputMethodItems"
-                            :content="false"
-                            @update:model-value="onInputMethodChange"
-                        />
-                    </template>
-                </u-form-field>
-            </div>
-        </section>
-
-        <!-- History -->
-        <section class="shadow-card rounded-lg bg-white p-7 dark:bg-neutral-900">
-            <h2 class="text-highlighted mb-4 text-sm font-semibold">History</h2>
-
-            <u-form-field label="Keep history for">
-                <div class="flex items-center gap-2">
-                    <u-input
-                        :model-value="String(settingsStore.historyRetentionDays)"
-                        type="number"
-                        size="xs"
-                        class="w-24"
-                        @update:model-value="onRetentionChange"
-                    />
-                    <span class="text-muted text-sm">days</span>
-                </div>
-            </u-form-field>
-        </section>
-
-        <!-- Models -->
-        <section class="shadow-card rounded-lg bg-white p-7 dark:bg-neutral-900">
-            <h2 class="text-highlighted mb-4 text-sm font-semibold">Models</h2>
-
-            <div v-if="audioStore.modelStatus" class="space-y-2">
-                <div
-                    v-for="model in audioStore.modelStatus.models"
-                    :key="model.filename"
-                    class="bg-muted flex items-center justify-between rounded-md px-3 py-2 text-xs"
-                >
-                    <div>
-                        <p class="font-medium">{{ model.name }}</p>
-                        <p class="text-dimmed">{{ model.filename }} ({{ model.sizeHint }})</p>
+                        <!-- Text input method -->
+                        <u-form-field label="Text input method">
+                            <template #default>
+                                <u-alert icon="i-lucide-info" color="info" variant="soft" class="mb-2">
+                                    <template v-if="settingsStore.textInputMethod === 'paste'" #title>
+                                        Paste mode replaces clipboard content
+                                    </template>
+                                    <template v-else #title>
+                                        Works as if all transcribed chars were typed one by one
+                                    </template>
+                                    <template #description>
+                                        <template v-if="settingsStore.textInputMethod === 'paste'">
+                                            Works as if whole transcription was
+                                            <u-kbd>ctrl</u-kbd>+<u-kbd>v</u-kbd>'d.
+                                        </template>
+                                        <template v-else>
+                                            May be slow in heavy editors (VS Code, JetBrains) because of syntax
+                                            highlighting repaint. Works fine in lightweight apps.
+                                        </template>
+                                    </template>
+                                </u-alert>
+                                <u-tabs
+                                    :model-value="settingsStore.textInputMethod"
+                                    :items="inputMethodItems"
+                                    :content="false"
+                                    @update:model-value="onInputMethodChange"
+                                />
+                            </template>
+                        </u-form-field>
                     </div>
-                    <u-badge
-                        :color="model.exists ? 'success' : 'error'"
-                        :variant="model.exists ? 'soft' : 'solid'"
-                        :label="model.exists ? 'OK' : 'Missing'"
-                        size="xs"
-                    />
                 </div>
+            </section>
 
-                <p class="text-dimmed mt-2 text-xs">
-                    Models directory:
-                    <code class="bg-muted rounded px-1">{{ audioStore.modelStatus.modelsDir }}</code>
-                </p>
+            <!-- Right column: History + Models -->
+            <div class="flex flex-col gap-8">
+                <!-- History -->
+                <section class="shadow-card rounded-lg bg-white p-7 dark:bg-neutral-900">
+                    <div class="max-w-[26rem]">
+                        <h2 class="text-highlighted mb-4 text-sm font-semibold">History</h2>
+
+                        <div class="pl-7">
+                            <u-form-field label="Keep history for">
+                                <div class="flex items-center gap-2">
+                                    <u-input
+                                        :model-value="String(settingsStore.historyRetentionDays)"
+                                        type="number"
+                                        size="xs"
+                                        class="w-24"
+                                        @update:model-value="onRetentionChange"
+                                    />
+                                    <span class="text-muted text-sm">days</span>
+                                </div>
+                            </u-form-field>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Models -->
+                <section class="shadow-card rounded-lg bg-white p-7 dark:bg-neutral-900">
+                    <div class="max-w-[26rem]">
+                        <h2 class="text-highlighted text-sm font-semibold">Models</h2>
+                        <p v-if="audioStore.modelStatus" class="text-dimmed mb-4 text-xs">
+                            <code class="bg-muted rounded px-1">{{ audioStore.modelStatus.modelsDir }}</code>
+                        </p>
+
+                        <div v-if="audioStore.modelStatus" class="space-y-2 pl-7">
+                            <div
+                                v-for="model in audioStore.modelStatus.models"
+                                :key="model.filename"
+                                class="bg-muted flex items-center justify-between rounded-md px-3 py-2 text-xs"
+                            >
+                                <div>
+                                    <p class="font-medium">{{ model.name }}</p>
+                                    <p class="text-dimmed">{{ model.filename }} ({{ model.sizeHint }})</p>
+                                </div>
+                                <u-badge
+                                    :color="model.exists ? 'success' : 'error'"
+                                    :variant="model.exists ? 'soft' : 'solid'"
+                                    :label="model.exists ? 'OK' : 'Missing'"
+                                    size="xs"
+                                />
+                            </div>
+                        </div>
+                    </div>
+                </section>
             </div>
-        </section>
+        </div>
 
         <!-- About -->
-        <div class="text-dimmed border-default border-t pt-4 text-center text-xs">
+        <div class="text-dimmed border-default mt-8 border-t pt-4 text-center text-xs">
             <p>Creo v0.1.0 · {{ platformLabel }}</p>
         </div>
     </div>
 </template>
 
 <script setup lang="ts">
+    import { RenameAssistant } from '~/widgets/rename-assistant';
     import IHold from '~/shared/ui/icons/ui/i-hold.vue';
     import ITap from '~/shared/ui/icons/ui/i-tap.vue';
+    import IPaste from '~/shared/ui/icons/ui/i-paste.vue';
+    import IKeyboard from '~/shared/ui/icons/ui/i-keyboard.vue';
+    import { HotkeyRecorder } from '~/features/hotkey-recorder';
+    import type { KeyCombo } from '~/shared/ui/keystroke-recorder/model/types';
     import type { TextInputMethod } from '~/entities/settings';
     import { useSettingsStore } from '~/entities/settings';
     import { useAudioStore } from '~/entities/audio';
@@ -127,7 +161,16 @@
     const audioStore = useAudioStore();
     const platformStore = usePlatformStore();
 
-    const hotkeyMode = ref('hold'); // TODO: persist via settings store
+    // TODO: persist hotkey and hotkeyMode via settings store
+    const hotkey = ref<KeyCombo>({
+        key: '`',
+        code: 'Backquote',
+        ctrl: true,
+        alt: false,
+        shift: false,
+        meta: false,
+    });
+    const hotkeyMode = ref('hold');
 
     const hotkeyModeItems = [
         { label: 'Hold', value: 'hold', icon: IHold },
@@ -135,19 +178,9 @@
     ];
 
     const inputMethodItems = [
-        { label: 'Paste', value: 'paste' },
-        { label: 'Type', value: 'type' },
+        { label: 'Paste', value: 'paste', icon: IPaste },
+        { label: 'Type', value: 'type', icon: IKeyboard },
     ];
-
-    const inputMethodTitle = computed(() =>
-        settingsStore.textInputMethod === 'paste' ? 'Replaces clipboard' : 'May be slow in heavy editors'
-    );
-
-    const inputMethodDescription = computed(() =>
-        settingsStore.textInputMethod === 'paste'
-            ? 'Dictated text replaces your current clipboard content.'
-            : 'Each character triggers syntax highlighting repaint in VS Code, JetBrains, etc. Works fine in lightweight apps.'
-    );
 
     const platformLabel = computed(() => {
         if (platformStore.isNativePlatform) return `Platform: ${platformStore.currentNativePlatform}`;
@@ -162,11 +195,4 @@
         const days = Math.max(1, Math.min(365, Number(value) || 30));
         settingsStore.setHistoryRetentionDays(days);
     }
-
-    onMounted(async () => {
-        if (platformStore.isNativePlatform) {
-            await settingsStore.init();
-            audioStore.checkModels();
-        }
-    });
 </script>

@@ -18,7 +18,3 @@
 @utility shadow-card {
     box-shadow: 0 8px 36px rgba(0, 0, 0, 0.1);
 }
-
-@utility shadow-card-hover {
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.14);
-}

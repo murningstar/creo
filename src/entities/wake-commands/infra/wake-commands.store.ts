@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 
 import type { RecordResult, WakeActionType, WakeCommandInfo } from '../model/types';
+import { getBaseCommandNames } from '../model/types';
 
 export const useWakeCommandsStore = defineStore('wake-commands', () => {
     const _commands = ref<WakeCommandInfo[]>([]);
@@ -47,6 +48,18 @@ export const useWakeCommandsStore = defineStore('wake-commands', () => {
         }
     }
 
+    async function deleteBaseCommands(assistantName: string) {
+        const names = getBaseCommandNames(assistantName);
+        for (const name of names) {
+            try {
+                await invoke('delete_wake_command', { commandName: name });
+            } catch {
+                // Command may not exist yet — ignore
+            }
+        }
+        await loadCommands();
+    }
+
     return {
         commands,
         isRecording,
@@ -55,5 +68,6 @@ export const useWakeCommandsStore = defineStore('wake-commands', () => {
         loadCommands,
         recordSample,
         deleteCommand,
+        deleteBaseCommands,
     };
 });

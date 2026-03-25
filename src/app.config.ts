@@ -11,7 +11,7 @@ export default defineAppConfig({
             slots: {
                 list: 'grid w-full auto-cols-fr grid-flow-col',
                 trigger: 'text-center',
-                root: 'w-fit min-w-96',
+                root: 'w-full',
             },
             compoundVariants: [
                 {
@@ -24,7 +24,7 @@ export default defineAppConfig({
             ],
         },
         kbd: {
-            base: 'px-2',
+            base: 'px-2 normal-case',
             defaultVariants: {
                 size: 'sm',
                 variant: 'outline',
@@ -32,10 +32,17 @@ export default defineAppConfig({
         },
         alert: {
             slots: {
-                root: 'p-2.5 gap-2',
+                root: 'p-2 gap-1.5',
                 title: 'text-xs',
                 description: 'text-xs',
                 icon: 'size-4',
+            },
+            variants: {
+                title: {
+                    true: {
+                        description: 'mt-0.5',
+                    },
+                },
             },
         },
     },
