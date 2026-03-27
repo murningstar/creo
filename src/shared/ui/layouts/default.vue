@@ -25,13 +25,20 @@
 </template>
 
 <script setup lang="ts">
+    const props = withDefaults(
+        defineProps<{
+            appLabel?: string;
+        }>(),
+        { appLabel: 'Home' }
+    );
+
     const route = useRoute();
     const router = useRouter();
 
-    const tabs = [
-        { label: 'Creo', value: '/', icon: 'i-lucide-layout-dashboard' },
+    const tabs = computed(() => [
+        { label: props.appLabel, value: '/', icon: 'i-lucide-layout-dashboard' },
         { label: 'Settings', value: '/settings', icon: 'i-lucide-settings' },
-    ];
+    ]);
 
     const currentTab = computed(() => route.path);
 

@@ -24,7 +24,8 @@ logs
 !.env.example
 
 # Ai stuff
-.claude
+.claude/*
+!.claude/docs
 
 # Tauri
 src-tauri/target

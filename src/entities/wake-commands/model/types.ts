@@ -1,6 +1,8 @@
 export const REQUIRED_SAMPLES = 3;
 
-export type WakeActionType = 'command_mode' | 'start_dictation' | 'stop_dictation';
+// Mirrors WakeAction in entities/audio/model/types.ts — kept separate per FSD (no cross-entity imports).
+// If adding a new action, update BOTH types.
+export type WakeActionType = 'await_subcommand' | 'start_dictation' | 'stop_dictation' | 'cancel_dictation';
 
 export interface WakeActionOption {
     value: WakeActionType;
@@ -9,9 +11,10 @@ export interface WakeActionOption {
 }
 
 export const WAKE_ACTION_OPTIONS: WakeActionOption[] = [
-    { value: 'command_mode', label: 'Command Mode', description: 'Activate command menu' },
+    { value: 'await_subcommand', label: 'Await Subcommand', description: 'Wait for a follow-up command' },
     { value: 'start_dictation', label: 'Start Dictation', description: 'Begin voice-to-text input' },
     { value: 'stop_dictation', label: 'Stop Dictation', description: 'Finish voice-to-text input' },
+    { value: 'cancel_dictation', label: 'Cancel Dictation', description: 'Abort dictation without injecting text' },
 ];
 
 export interface WakeCommandInfo {
@@ -38,7 +41,7 @@ export interface BaseCommandDef {
 
 export const BASE_COMMANDS: BaseCommandDef[] = [
     {
-        action: 'command_mode',
+        action: 'await_subcommand',
         suffix: 'приём',
         label: 'Wake command',
         instruction: 'Activates the assistant',
@@ -54,6 +57,12 @@ export const BASE_COMMANDS: BaseCommandDef[] = [
         suffix: 'готово',
         label: 'Stop dictation',
         instruction: 'Finishes voice-to-text input',
+    },
+    {
+        action: 'cancel_dictation',
+        suffix: 'отмена',
+        label: 'Cancel dictation',
+        instruction: 'Aborts dictation without injecting text',
     },
 ];
 

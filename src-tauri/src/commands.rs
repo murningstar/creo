@@ -18,14 +18,18 @@ const EMB_MODEL_FILENAME: &str = "embedding_model.onnx";
 const WHISPER_DICTATION_MODEL_FILENAME: &str = "ggml-base.bin";
 const WAKEWORDS_DIR_NAME: &str = "wakewords";
 
-/// Platform-specific models directory (ASCII-safe on Windows).
-fn get_models_dir() -> PathBuf {
+/// Platform-specific base data directory (ASCII-safe on Windows).
+fn get_creo_data_dir() -> PathBuf {
     if cfg!(target_os = "windows") {
-        PathBuf::from("C:\\creo-data\\models")
+        PathBuf::from("C:\\creo-data")
     } else {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        PathBuf::from(home).join(".local/share/creo/models")
+        PathBuf::from(home).join(".local/share/creo")
     }
+}
+
+fn get_models_dir() -> PathBuf {
+    get_creo_data_dir().join("models")
 }
 
 #[tauri::command]
@@ -89,13 +93,7 @@ fn start_pipeline_with_mode(
     let emb_path = dir.join(EMB_MODEL_FILENAME);
     let dictation_path = dir.join(WHISPER_DICTATION_MODEL_FILENAME);
 
-    let base_dir = if cfg!(target_os = "windows") {
-        PathBuf::from("C:\\creo-data")
-    } else {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        PathBuf::from(home).join(".local/share/creo")
-    };
-    let wakewords_dir = base_dir.join(WAKEWORDS_DIR_NAME);
+    let wakewords_dir = get_creo_data_dir().join(WAKEWORDS_DIR_NAME);
 
     if !vad_path.exists() || !mel_path.exists() || !emb_path.exists() || !dictation_path.exists() {
         return Err(format!(
@@ -122,10 +120,10 @@ pub fn start_listening(
     app: AppHandle,
     state: State<'_, Arc<PipelineHandle>>,
 ) -> Result<(), String> {
-    if state.current_mode() != AudioMode::Idle {
-        return Err("Pipeline already running".to_string());
+    if state.current_mode() != AudioMode::Off {
+        return Ok(()); // Already running — idempotent no-op
     }
-    start_pipeline_with_mode(app, state.inner(), AudioMode::Listening)
+    start_pipeline_with_mode(app, state.inner(), AudioMode::Standby)
 }
 
 #[tauri::command]
@@ -133,10 +131,51 @@ pub fn start_dictation(
     app: AppHandle,
     state: State<'_, Arc<PipelineHandle>>,
 ) -> Result<(), String> {
-    if state.current_mode() != AudioMode::Idle {
+    if state.current_mode() != AudioMode::Off {
         return Err("Pipeline already running".to_string());
     }
     start_pipeline_with_mode(app, state.inner(), AudioMode::Dictation)
+}
+
+/// Transition running pipeline to Dictation mode (no restart).
+/// Use this when the pipeline is already running in Standby.
+#[tauri::command]
+pub fn transition_to_dictation(
+    app: AppHandle,
+    state: State<'_, Arc<PipelineHandle>>,
+) -> Result<(), String> {
+    let mode = state.current_mode();
+    if mode == AudioMode::Off {
+        return Err("Pipeline not running".to_string());
+    }
+    state.transition_mode(&app, AudioMode::Dictation);
+    log::info!("Transitioned to Dictation (from {:?})", mode);
+    Ok(())
+}
+
+/// Transition running pipeline back to Standby mode (no restart).
+/// Use this to end dictation without killing the pipeline.
+#[tauri::command]
+pub fn transition_to_standby(
+    app: AppHandle,
+    state: State<'_, Arc<PipelineHandle>>,
+) -> Result<(), String> {
+    let mode = state.current_mode();
+    if mode == AudioMode::Off {
+        return Err("Pipeline not running".to_string());
+    }
+    state.transition_mode(&app, AudioMode::Standby);
+    log::info!("Transitioned to Standby (from {:?})", mode);
+    Ok(())
+}
+
+/// Get current pipeline mode (for frontend sync after reload).
+#[tauri::command]
+pub fn get_current_mode(
+    state: State<'_, Arc<PipelineHandle>>,
+) -> String {
+    let mode = state.current_mode();
+    serde_json::to_string(&mode).unwrap_or_else(|_| "\"off\"".to_string())
 }
 
 #[tauri::command]
@@ -146,7 +185,7 @@ pub fn stop_listening(
 ) -> Result<(), String> {
     state.request_shutdown();
     state.join_threads()?;
-    state.transition_mode(&app, AudioMode::Idle);
+    state.transition_mode(&app, AudioMode::Off);
     state.reset_shutdown();
 
     log::info!("Pipeline stopped");
@@ -222,22 +261,38 @@ pub fn detect_system() -> SystemInfo {
 
 // --- Wake word management ---
 
-fn get_wakewords_dir() -> PathBuf {
-    if cfg!(target_os = "windows") {
-        PathBuf::from("C:\\creo-data\\wakewords")
-    } else {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        PathBuf::from(home).join(".local/share/creo/wakewords")
+/// Validate command name is safe for use as a filesystem directory name.
+fn validate_command_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("Command name cannot be empty".to_string());
     }
+    if name.contains("..") || name.contains('/') || name.contains('\\') || name.contains('\0') {
+        return Err(format!("Command name contains invalid characters: '{}'", name));
+    }
+    // Windows reserved characters
+    if cfg!(target_os = "windows") && name.chars().any(|c| matches!(c, ':' | '*' | '?' | '"' | '<' | '>' | '|')) {
+        return Err(format!("Command name contains Windows-reserved characters: '{}'", name));
+    }
+    Ok(())
+}
+
+fn get_wakewords_dir() -> PathBuf {
+    get_creo_data_dir().join("wakewords")
 }
 
 /// Record a voice sample using VAD: starts capturing, waits for speech,
 /// records until silence detected, then extracts embeddings and saves.
 /// Called from UI when user clicks "record" button during command creation.
 /// Record a voice sample using VAD, extract embeddings, save.
-/// `action` maps this command to a WakeAction: "command_mode", "start_dictation", "stop_dictation".
+/// `action` maps this command to a WakeAction: "await_subcommand", "start_dictation", "stop_dictation", "cancel_dictation".
 #[tauri::command]
-pub fn record_wake_sample(command_name: String, action: Option<String>) -> Result<RecordResult, String> {
+pub fn record_wake_sample(
+    command_name: String,
+    action: Option<String>,
+    state: State<'_, Arc<PipelineHandle>>,
+) -> Result<RecordResult, String> {
+    validate_command_name(&command_name)?;
+
     use crate::audio::wakeword::WakeWordDetector;
     use crate::audio::vad::SileroVad;
     use crate::audio::WakeAction;
@@ -339,7 +394,7 @@ pub fn record_wake_sample(command_name: String, action: Option<String>) -> Resul
     if let Some(action_str) = action {
         let wake_action: WakeAction =
             serde_json::from_str(&format!("\"{}\"", action_str))
-                .map_err(|_| format!("Unknown action: '{}'. Valid: command_mode, start_dictation, stop_dictation", action_str))?;
+                .map_err(|_| format!("Unknown action: '{}'. Valid: await_subcommand, start_dictation, stop_dictation, cancel_dictation", action_str))?;
         detector
             .save_action_mapping(&command_name, wake_action)
             .map_err(|e| e.to_string())?;
@@ -352,6 +407,9 @@ pub fn record_wake_sample(command_name: String, action: Option<String>) -> Resul
         command_name,
         sample_count
     );
+
+    // Signal running pipeline to reload wake word references
+    state.request_reload_references();
 
     Ok(RecordResult {
         command_name,
@@ -386,14 +444,41 @@ pub fn get_wake_commands() -> Vec<WakeCommandInfo> {
     commands
 }
 
-/// Delete a wake word command and all its samples.
+/// Delete a wake word command: remove sample directory + clean config.json action mapping.
 #[tauri::command]
-pub fn delete_wake_command(command_name: String) -> Result<(), String> {
-    let dir = get_wakewords_dir().join(&command_name);
+pub fn delete_wake_command(
+    command_name: String,
+    state: State<'_, Arc<PipelineHandle>>,
+) -> Result<(), String> {
+    validate_command_name(&command_name)?;
+
+    let wakewords_dir = get_wakewords_dir();
+    let dir = wakewords_dir.join(&command_name);
     if dir.exists() {
         std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
         log::info!("Deleted wake command: {}", command_name);
     }
+
+    // Clean up action mapping in config.json
+    let config_path = wakewords_dir.join("config.json");
+    if config_path.exists() {
+        if let Ok(data) = std::fs::read_to_string(&config_path) {
+            if let Ok(mut map) =
+                serde_json::from_str::<std::collections::HashMap<String, serde_json::Value>>(&data)
+            {
+                if map.remove(&command_name).is_some() {
+                    if let Ok(json) = serde_json::to_string_pretty(&map) {
+                        let _ = std::fs::write(&config_path, json);
+                    }
+                    log::info!("Cleaned config.json entry: {}", command_name);
+                }
+            }
+        }
+    }
+
+    // Signal running pipeline to reload wake word references
+    state.request_reload_references();
+
     Ok(())
 }
 
@@ -415,17 +500,19 @@ fn get_sample_count(command_name: &str) -> usize {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct RecordResult {
+    #[serde(rename = "commandName")]
     pub command_name: String,
+    #[serde(rename = "embeddingCount")]
     pub embedding_count: usize,
+    #[serde(rename = "totalSamples")]
     pub total_samples: usize,
     pub path: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub struct WakeCommandInfo {
     pub name: String,
+    #[serde(rename = "sampleCount")]
     pub sample_count: usize,
 }

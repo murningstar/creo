@@ -12,12 +12,17 @@ use super::vad::SileroVad;
 use super::wakeword::WakeWordDetector;
 use super::{
     AudioMode, ErrorPayload, PipelineHandle, TranscriptionPayload, TranscriptionRequest,
-    TranscriptionResult, VadStatePayload, WakeCommand, WakeCommandPayload,
+    TranscriptionResult, VadStatePayload, WakeAction, WakeActionPayload,
 };
 
-const VAD_SILENCE_TIMEOUT_MS: u64 = 300;
+const SILENCE_TIMEOUT_STANDBY_MS: u64 = 300;
+const SILENCE_TIMEOUT_DICTATION_MS: u64 = 800;
 const MIN_SPEECH_SAMPLES: usize = 4000; // ~250ms at 16kHz
 const TRANSCRIPTION_CHANNEL_CAPACITY: usize = 4;
+
+/// Audio overlap: keep last 500ms of audio to prepend to next segment.
+/// Prevents mid-word splits at VAD boundaries.
+const OVERLAP_SAMPLES: usize = 8000; // 500ms at 16kHz
 
 pub fn start_pipeline(
     app_handle: AppHandle,
@@ -34,6 +39,9 @@ pub fn start_pipeline(
     // Channels between processing ↔ transcription threads
     let (trans_tx, trans_rx): (Sender<TranscriptionRequest>, Receiver<TranscriptionRequest>) =
         bounded(TRANSCRIPTION_CHANNEL_CAPACITY);
+
+    // Store sender in PipelineHandle so commands can send reload signals
+    handle.set_trans_tx(trans_tx.clone());
     let (result_tx, result_rx): (Sender<TranscriptionResult>, Receiver<TranscriptionResult>) =
         bounded(TRANSCRIPTION_CHANNEL_CAPACITY);
 
@@ -96,6 +104,9 @@ fn processing_thread(
     let mut silence_start: Option<Instant> = None;
     let chunk_size = SileroVad::chunk_size();
 
+    // Audio overlap: rolling buffer of last 500ms for cross-segment continuity
+    let mut pre_buffer: Vec<f32> = Vec::new();
+
     log::info!(
         "Processing thread started (native rate: {}Hz)",
         native_rate
@@ -119,21 +130,12 @@ fn processing_thread(
             Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
         };
 
-        if handle.current_mode() == AudioMode::Idle {
+        if handle.current_mode() == AudioMode::Off {
             continue;
         }
 
         // Resample to 16kHz
         let resampled = resampler.process(&chunk);
-
-        // TEMPORARY: log audio RMS every ~1 sec to confirm mic captures speech
-        // TODO: remove after confirming pipeline works end-to-end
-        static AUDIO_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let ac = AUDIO_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if ac % 30 == 0 && !resampled.is_empty() {
-            let rms = (resampled.iter().map(|s| s * s).sum::<f32>() / resampled.len() as f32).sqrt();
-            log::info!("Audio RMS: {:.6} (resampled {} samples)", rms, resampled.len());
-        }
 
         vad_buffer.extend_from_slice(&resampled);
 
@@ -167,7 +169,13 @@ fn processing_thread(
                 }
 
                 if let Some(start) = silence_start {
-                    if start.elapsed() > Duration::from_millis(VAD_SILENCE_TIMEOUT_MS) {
+                    // Mode-dependent silence threshold
+                    let timeout_ms = match handle.current_mode() {
+                        AudioMode::Dictation => SILENCE_TIMEOUT_DICTATION_MS,
+                        _ => SILENCE_TIMEOUT_STANDBY_MS,
+                    };
+
+                    if start.elapsed() > Duration::from_millis(timeout_ms) {
                         // Silence timeout — send accumulated speech for processing
                         is_speaking = false;
                         silence_start = None;
@@ -178,14 +186,23 @@ fn processing_thread(
                             let buffer = std::mem::take(&mut speech_buffer);
 
                             match handle.current_mode() {
-                                AudioMode::Listening => {
+                                AudioMode::Standby | AudioMode::AwaitingSubcommand => {
+                                    handle.save_pre_processing_mode();
                                     handle.transition_mode(&app, AudioMode::Processing);
                                     let _ =
                                         trans_tx.send(TranscriptionRequest::WakeWordCheck(buffer));
                                 }
                                 AudioMode::Dictation => {
-                                    let _ =
-                                        trans_tx.send(TranscriptionRequest::DictationChunk(buffer));
+                                    // Prepend overlap from previous segment
+                                    let mut with_overlap = pre_buffer.clone();
+                                    with_overlap.extend_from_slice(&buffer);
+
+                                    // Save tail of current buffer as overlap for next segment
+                                    let tail_start = buffer.len().saturating_sub(OVERLAP_SAMPLES);
+                                    pre_buffer = buffer[tail_start..].to_vec();
+
+                                    let _ = trans_tx
+                                        .send(TranscriptionRequest::DictationChunk(with_overlap));
                                 }
                                 _ => {}
                             }
@@ -211,14 +228,17 @@ fn handle_transcription_result(
     result: TranscriptionResult,
 ) {
     match result {
-        TranscriptionResult::WakeCommand(cmd) => {
+        TranscriptionResult::WakeAction(cmd) => {
             log::info!("Wake command: {:?}", cmd);
-            let _ = app.emit("wake-command", WakeCommandPayload { command: cmd });
+            let _ = app.emit("wake-command", WakeActionPayload { command: cmd });
 
             match cmd {
-                WakeCommand::StartDictation => handle.transition_mode(app, AudioMode::Dictation),
-                WakeCommand::StopDictation | WakeCommand::CommandMode => {
-                    handle.transition_mode(app, AudioMode::Listening)
+                WakeAction::StartDictation => handle.transition_mode(app, AudioMode::Dictation),
+                WakeAction::StopDictation | WakeAction::CancelDictation => {
+                    handle.transition_mode(app, AudioMode::Standby)
+                }
+                WakeAction::AwaitSubcommand => {
+                    handle.transition_mode(app, AudioMode::AwaitingSubcommand)
                 }
             }
         }
@@ -227,7 +247,7 @@ fn handle_transcription_result(
         }
         TranscriptionResult::NoMatch => {
             if handle.current_mode() == AudioMode::Processing {
-                handle.transition_mode(app, AudioMode::Listening);
+                handle.transition_mode(app, handle.pre_processing_mode());
             }
         }
     }
@@ -245,7 +265,7 @@ fn transcription_thread(
 ) -> Result<()> {
     let mut wake_detector = WakeWordDetector::new(mel_model_path, emb_model_path, wakewords_dir)?;
     log::info!("Wake word detector loaded (embedding+DTW)");
-    let dictation_transcriber = Transcriber::new(dictation_model_path)?;
+    let mut dictation_transcriber = Transcriber::new(dictation_model_path)?;
     log::info!("Dictation model loaded: {}", dictation_model_path);
 
     loop {
@@ -266,8 +286,9 @@ fn transcription_thread(
                     let _ = result_tx.send(TranscriptionResult::NoMatch);
                 } else {
                     match wake_detector.detect(&audio) {
-                        Some(cmd) => {
-                            let _ = result_tx.send(TranscriptionResult::WakeCommand(cmd));
+                        Some(detection) => {
+                            let _ = result_tx
+                                .send(TranscriptionResult::WakeAction(detection.action));
                         }
                         None => {
                             let _ = result_tx.send(TranscriptionResult::NoMatch);
@@ -276,16 +297,23 @@ fn transcription_thread(
                 }
             }
             TranscriptionRequest::DictationChunk(audio) => {
-                // First check if this is a "gotovo" command via embedding+DTW
+                // First check if this is a stop/cancel command via embedding+DTW
                 if wake_detector.has_references() {
-                    if let Some(WakeCommand::StopDictation) = wake_detector.detect(&audio) {
-                        let _ = result_tx
-                            .send(TranscriptionResult::WakeCommand(WakeCommand::StopDictation));
-                        continue;
+                    if let Some(detection) = wake_detector.detect(&audio) {
+                        if matches!(
+                            detection.action,
+                            WakeAction::StopDictation | WakeAction::CancelDictation
+                        ) {
+                            let _ = result_tx
+                                .send(TranscriptionResult::WakeAction(detection.action));
+                            dictation_transcriber.reset_context();
+                            continue;
+                        }
                     }
                 }
 
                 // Not a stop command — transcribe as dictation text
+                // TODO: language should come from settings, not hardcoded
                 match dictation_transcriber.transcribe(&audio, "ru") {
                     Ok(text) => {
                         let trimmed = text.trim().to_string();
@@ -305,6 +333,12 @@ fn transcription_thread(
                             },
                         );
                     }
+                }
+            }
+            TranscriptionRequest::ReloadReferences => {
+                match wake_detector.reload_references() {
+                    Ok(()) => log::info!("Wake word references reloaded"),
+                    Err(e) => log::error!("Failed to reload references: {}", e),
                 }
             }
             TranscriptionRequest::Shutdown => break,

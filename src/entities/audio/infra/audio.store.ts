@@ -12,7 +12,7 @@ import type {
 import { AudioMode } from '../model/types';
 
 export const useAudioStore = defineStore('audio', () => {
-    const _mode = ref<AudioMode>(AudioMode.Idle);
+    const _mode = ref<AudioMode>(AudioMode.Off);
     const _isSpeech = ref(false);
     const _lastTranscription = ref('');
     const _error = ref<string | null>(null);
@@ -25,10 +25,11 @@ export const useAudioStore = defineStore('audio', () => {
     const error = readonly(_error);
     const modelStatus = readonly(_modelStatus);
 
-    const isListening = computed<boolean>(() => _mode.value === AudioMode.Listening);
+    const isStandby = computed<boolean>(() => _mode.value === AudioMode.Standby);
     const isDictation = computed<boolean>(() => _mode.value === AudioMode.Dictation);
     const isProcessing = computed<boolean>(() => _mode.value === AudioMode.Processing);
-    const isIdle = computed<boolean>(() => _mode.value === AudioMode.Idle);
+    const isOff = computed<boolean>(() => _mode.value === AudioMode.Off);
+    const isAwaitingSubcommand = computed<boolean>(() => _mode.value === AudioMode.AwaitingSubcommand);
 
     /** DEV ONLY: sets frontend mode without Tauri IPC — backend state will NOT change. */
     const __devSetMode = (newMode: AudioMode) => {
@@ -61,6 +62,17 @@ export const useAudioStore = defineStore('audio', () => {
         }
     }
 
+    /** Sync frontend mode with current Rust pipeline state (for reload recovery). */
+    async function syncMode() {
+        try {
+            const modeStr = await invoke<string>('get_current_mode');
+            const mode = JSON.parse(modeStr) as AudioMode;
+            _mode.value = mode;
+        } catch {
+            // Not running in Tauri or pipeline not initialized — stay Off
+        }
+    }
+
     async function testCapture(): Promise<string | null> {
         _error.value = null;
         try {
@@ -72,6 +84,11 @@ export const useAudioStore = defineStore('audio', () => {
     }
 
     async function setupEventListeners() {
+        // Guard: cleanup existing listeners before re-registering (handles HMR / reload)
+        if (_unlisten.value.length > 0) {
+            cleanup();
+        }
+
         const listeners = await Promise.all([
             listen<AudioStateEvent>('audio-state-changed', event => {
                 _mode.value = event.payload.mode;
@@ -110,13 +127,15 @@ export const useAudioStore = defineStore('audio', () => {
         lastTranscription,
         error,
         modelStatus,
-        isListening,
+        isStandby,
         isDictation,
         isProcessing,
-        isIdle,
+        isOff,
+        isAwaitingSubcommand,
         startListening,
         stopListening,
         checkModels,
+        syncMode,
         testCapture,
         setupEventListeners,
         cleanup,

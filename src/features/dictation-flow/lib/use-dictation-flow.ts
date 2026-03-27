@@ -40,6 +40,11 @@ export function useDictationFlow() {
     const settingsStore = useSettingsStore();
 
     async function setupListeners() {
+        // Guard: cleanup existing listeners before re-registering (handles HMR / reload)
+        if (_unlisten.value.length > 0) {
+            cleanup();
+        }
+
         const listeners = await Promise.all([
             // Hotkey: mode-aware (hold or toggle)
             listen('hotkey-pressed', async () => {
@@ -51,7 +56,7 @@ export function useDictationFlow() {
                         _phase.value = DictationPhase.Finishing;
                         startFinishingTimeout();
                         try {
-                            await invoke('stop_listening');
+                            await invoke('transition_to_standby');
                         } catch (e) {
                             _error.value = String(e);
                             transitionToInactive();
@@ -66,7 +71,7 @@ export function useDictationFlow() {
                 _phase.value = DictationPhase.Starting;
                 _error.value = null;
                 try {
-                    await invoke('start_dictation');
+                    await invoke('transition_to_dictation');
                 } catch (e) {
                     _error.value = String(e);
                     _phase.value = DictationPhase.Inactive;
@@ -82,7 +87,7 @@ export function useDictationFlow() {
                 _phase.value = DictationPhase.Finishing;
                 startFinishingTimeout();
                 try {
-                    await invoke('stop_listening');
+                    await invoke('transition_to_standby');
                 } catch (e) {
                     _error.value = String(e);
                     transitionToInactive();
@@ -125,8 +130,11 @@ export function useDictationFlow() {
                     _phase.value = DictationPhase.Active;
                 }
 
-                if (event.payload.command === 'stop_dictation' && _phase.value === DictationPhase.Active) {
-                    // Pipeline handles transition to Listening
+                if (
+                    (event.payload.command === 'stop_dictation' || event.payload.command === 'cancel_dictation') &&
+                    _phase.value === DictationPhase.Active
+                ) {
+                    // Pipeline handles transition to Standby
                     transitionToInactive();
                 }
             }),

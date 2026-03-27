@@ -1,11 +1,12 @@
 export enum AudioMode {
-    Idle = 'idle',
-    Listening = 'listening',
+    Off = 'off',
+    Standby = 'standby',
     Dictation = 'dictation',
     Processing = 'processing',
+    AwaitingSubcommand = 'awaiting_subcommand',
 }
 
-export type WakeAction = 'command_mode' | 'start_dictation' | 'stop_dictation';
+export type WakeAction = 'await_subcommand' | 'start_dictation' | 'stop_dictation' | 'cancel_dictation';
 
 export interface AudioStateEvent {
     mode: AudioMode;

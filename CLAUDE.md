@@ -60,6 +60,8 @@
 ## Audio Pipeline Architecture
 
 > **Details:** [`.claude/docs/audio-pipeline.md`](.claude/docs/audio-pipeline.md) — pipeline diagram, models table, GPU compatibility, auto-configuration.
+> **Evolution plan:** [`.claude/docs/evolution-plan.md`](.claude/docs/evolution-plan.md) — tiered cascade architecture, модели по ролям, эволюционный путь от текущего состояния к целевому. **Сверяться:** при любых изменениях в audio pipeline, при анализе текущего состояния точек соприкосновения технологий, при неполадках (плохое определение wake words, плохая транскрипция, false positives).
+> **Architecture audit:** [`.claude/docs/architecture-audit.md`](.claude/docs/architecture-audit.md) — 25 findings от 3 independent auditors (2026-03-27). Статусы обновляются по мере фиксов. **Сверяться:** перед любой cross-cutting доработкой, при архитектурных решениях.
 
 Краткая схема: Микрофон (cpal) → Silero VAD (ort/ONNX) → speech buffer → whisper-rs → fuzzy wake word match / dictation text → Tauri events → Vue frontend. Три потока: capture, VAD processing, whisper transcription.
 
@@ -183,7 +185,7 @@ app → pages → widgets → features → entities → shared
 **Store методы:**
 
 - `_privateMethod` или `__internalMethod` — приватные/внутренние
-- Публичные computed — без префикса: `isListening`, `isNativePlatform`
+- Публичные computed — без префикса: `isStandby`, `isNativePlatform`
 - `readonly()` для защиты состояния от прямого изменения
 
 **Типы:**
@@ -207,6 +209,13 @@ app → pages → widgets → features → entities → shared
 
 - Все payload/model структуры (`AudioMode`, `ModelInfo`, `ModelStatus`, `WakeCommand`, etc.) живут в `audio/mod.rs`
 - `commands.rs` — только Tauri command handlers + platform-specific logic (`get_models_dir`)
+
+**Serde & wire format stability:**
+
+- Enum'ы с serde НЕ используют `rename_all` — каждый вариант имеет явный `#[serde(rename = "...")]`
+- Это развязывает имя Rust-варианта и сериализованное значение: переименование варианта не ломает данные на диске / frontend
+- При переименовании старого значения — добавлять `#[serde(alias = "old_name")]` для обратной совместимости
+- Snapshot-тесты в `audio/mod.rs` проверяют стабильность wire format — если тест упал, значит изменился формат, нужна миграция
 
 ### File Structure per Segment
 
@@ -234,8 +243,8 @@ segment/
 **audio** (`entities/audio/`):
 
 - Pinia store: `useAudioStore()`
-- `AudioMode` enum: Idle, Listening, Dictation, Processing
-- Computed: `isListening`, `isDictation`, `isProcessing`, `isIdle`
+- `AudioMode` enum: Off, Standby, Dictation, Processing, AwaitingSubcommand
+- Computed: `isOff`, `isStandby`, `isDictation`, `isProcessing`, `isAwaitingSubcommand`
 
 ---
 

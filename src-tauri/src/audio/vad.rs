@@ -81,7 +81,7 @@ impl SileroVad {
     }
 
     pub fn process_chunk(&mut self, chunk: &[f32]) -> Result<f32> {
-        assert_eq!(chunk.len(), CHUNK_SIZE, "VAD chunk must be {} samples", CHUNK_SIZE);
+        anyhow::ensure!(chunk.len() == CHUNK_SIZE, "VAD chunk must be {} samples, got {}", CHUNK_SIZE, chunk.len());
 
         let mut input_data = Vec::with_capacity(INPUT_SIZE);
         input_data.extend_from_slice(&self.context);

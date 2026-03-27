@@ -690,6 +690,7 @@ dependencies = [
  "ash",
  "cpal",
  "crossbeam-channel",
+ "dtw_rs",
  "enigo",
  "linfa",
  "linfa-svm",
@@ -1008,6 +1009,12 @@ checksum = "cd1511a7b6a56299bd043a9c167a6d2bfb37bf84a6dfceaba651168adfb43c87"
 dependencies = [
  "dtoa",
 ]
+
+[[package]]
+name = "dtw_rs"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "20445f09f7252a8c33f70604a43a288ab78a8d05ba7d53955dbfb553e561dde2"
 
 [[package]]
 name = "dunce"

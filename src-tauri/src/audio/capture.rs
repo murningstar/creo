@@ -55,7 +55,13 @@ impl AudioCapture {
                 };
 
                 // Non-blocking send — drop data if channel is full
-                let _ = tx.try_send(mono);
+                if tx.try_send(mono).is_err() {
+                    static DROP_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+                    let count = DROP_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if count % 100 == 0 {
+                        log::warn!("Audio capture: dropped {} chunks (channel full)", count + 1);
+                    }
+                }
             },
             |err| {
                 log::error!("Audio capture error: {}", err);

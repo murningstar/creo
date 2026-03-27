@@ -12,8 +12,16 @@ export default defineNuxtPlugin(async () => {
         const audioStore = useAudioStore();
 
         await settingsStore.init();
-        audioStore.checkModels();
+        await audioStore.checkModels();
         audioStore.setupEventListeners();
+
+        // Sync frontend with current pipeline state (handles webview reload)
+        await audioStore.syncMode();
+
+        // Auto-start: if all models present and pipeline not already running, go to Standby
+        if (audioStore.isOff && audioStore.modelStatus?.allPresent) {
+            audioStore.startListening();
+        }
 
         // Register persisted hotkey (overrides Rust default if different)
         await registerGlobalHotkey(settingsStore.hotkey);
@@ -25,11 +33,15 @@ export default defineNuxtPlugin(async () => {
 
 async function registerGlobalHotkey(hotkey: ReturnType<typeof useSettingsStore>['hotkey']['value']) {
     try {
-        const { unregisterAll, register } = await import('@tauri-apps/plugin-global-shortcut');
+        const { unregister, register } = await import('@tauri-apps/plugin-global-shortcut');
         const { getCurrentWindow } = await import('@tauri-apps/api/window');
 
-        // Clear Rust-registered default
-        await unregisterAll();
+        // Clear Rust-registered default hotkey (Ctrl+Backquote)
+        try {
+            await unregister('CmdOrCtrl+Backquote');
+        } catch {
+            // May not be registered — ignore
+        }
 
         if (!hotkey) return;
 

@@ -53,8 +53,9 @@ export const useWakeCommandsStore = defineStore('wake-commands', () => {
         for (const name of names) {
             try {
                 await invoke('delete_wake_command', { commandName: name });
-            } catch {
-                // Command may not exist yet — ignore
+            } catch (e) {
+                // Log but don't fail — command may not exist yet, or was already deleted
+                console.warn(`Failed to delete command '${name}':`, e);
             }
         }
         await loadCommands();

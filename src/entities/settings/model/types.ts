@@ -22,6 +22,17 @@ export interface AppSettings {
     hotkeyMode: HotkeyMode;
 }
 
+/** Store keys — single source of truth for Tauri Store key names. */
+export const STORE_KEY = {
+    assistantName: 'assistantName',
+    textInputMethod: 'textInputMethod',
+    historyRetentionDays: 'historyRetentionDays',
+    hotkey: 'hotkey',
+    hotkeyMode: 'hotkeyMode',
+} as const satisfies Record<keyof AppSettings, string>;
+
+export const STORE_FILENAME = 'settings.json';
+
 export const DEFAULT_SETTINGS: AppSettings = {
     assistantName: DEFAULT_ASSISTANT_NAME,
     textInputMethod: 'paste',

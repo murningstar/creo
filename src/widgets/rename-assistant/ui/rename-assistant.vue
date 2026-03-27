@@ -114,8 +114,10 @@
         const trimmed = newName.value.trim();
 
         try {
-            await wakeStore.deleteBaseCommands(oldName);
+            // Persist name FIRST — if this fails, nothing else changes (safe).
+            // If delete fails after, orphaned dirs appear as user commands (visible, not lost).
             await settingsStore.setAssistantName(trimmed);
+            await wakeStore.deleteBaseCommands(oldName);
             await wakeStore.loadCommands();
         } finally {
             close();

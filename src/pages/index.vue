@@ -47,38 +47,117 @@
             <section class="shadow-card rounded-lg bg-white p-5 dark:bg-neutral-900">
                 <h2 class="text-highlighted mb-4 text-sm font-semibold">Voice Commands</h2>
 
-                <ActionList label="New command" @add="openCreateModal">
+                <!-- Categorized view: after Wizard/Rename setup -->
+                <div v-if="hasSystemSetup" class="space-y-2">
+                    <!-- System commands (вписывай, готово, отмена) -->
                     <div
-                        v-for="cmd in wakeStore.commands"
+                        v-for="cmd in systemCommands"
                         :key="cmd.name"
-                        class="bg-muted flex items-center justify-between rounded-md px-3 py-2"
+                        class="bg-muted flex items-center gap-2 rounded-md px-3 py-2"
                     >
-                        <div>
-                            <p class="text-sm font-medium">{{ cmd.name }}</p>
-                            <div class="mt-0.5">
-                                <u-badge
-                                    :color="cmd.sampleCount >= REQUIRED_SAMPLES ? 'success' : 'warning'"
-                                    variant="soft"
-                                    :label="`${cmd.sampleCount}/${REQUIRED_SAMPLES} samples${cmd.sampleCount < REQUIRED_SAMPLES ? ' — needs more' : ''}`"
-                                    size="xs"
-                                />
-                            </div>
-                        </div>
-                        <div class="flex gap-1">
-                            <u-button size="xs" variant="ghost" color="primary" @click="openEditModal(cmd.name)">
-                                Edit
-                            </u-button>
+                        <span class="grow text-sm font-medium">{{ cmd.name }}</span>
+                        <u-badge
+                            :color="cmd.sampleCount >= REQUIRED_SAMPLES ? 'success' : 'warning'"
+                            variant="soft"
+                            :label="`${cmd.sampleCount}/${REQUIRED_SAMPLES}`"
+                            size="xs"
+                        />
+                        <u-button size="xs" variant="ghost" color="primary" @click="openEditModal(cmd.name)">
+                            Edit
+                        </u-button>
+                    </div>
+
+                    <!-- Приём container -->
+                    <div v-if="priemCommand" class="rounded-md border border-neutral-200 dark:border-neutral-700">
+                        <!-- Приём header (same style as system commands) -->
+                        <div class="bg-muted flex items-center gap-2 rounded-t-md px-3 py-2">
+                            <span class="grow text-sm font-medium">{{ priemCommand.name }}</span>
+                            <u-badge
+                                :color="priemCommand.sampleCount >= REQUIRED_SAMPLES ? 'success' : 'warning'"
+                                variant="soft"
+                                :label="`${priemCommand.sampleCount}/${REQUIRED_SAMPLES}`"
+                                size="xs"
+                            />
                             <u-button
                                 size="xs"
                                 variant="ghost"
-                                color="error"
-                                @click="wakeStore.deleteCommand(cmd.name)"
+                                color="primary"
+                                @click="openEditModal(priemCommand.name)"
                             >
-                                Delete
+                                Edit
                             </u-button>
                         </div>
+
+                        <!-- Subcommands -->
+                        <div class="space-y-2 p-2">
+                            <div
+                                v-for="cmd in userCommands"
+                                :key="cmd.name"
+                                class="flex items-center gap-2 rounded-md border border-neutral-300 px-3 py-2 dark:border-neutral-600"
+                            >
+                                <span class="grow text-sm font-medium">{{ cmd.name }}</span>
+                                <u-badge
+                                    :color="cmd.sampleCount >= REQUIRED_SAMPLES ? 'success' : 'warning'"
+                                    variant="soft"
+                                    :label="`${cmd.sampleCount}/${REQUIRED_SAMPLES}`"
+                                    size="xs"
+                                />
+                                <u-button size="xs" variant="ghost" color="primary" @click="openEditModal(cmd.name)">
+                                    Edit
+                                </u-button>
+                                <u-button
+                                    size="xs"
+                                    variant="ghost"
+                                    color="error"
+                                    @click="wakeStore.deleteCommand(cmd.name)"
+                                >
+                                    Delete
+                                </u-button>
+                            </div>
+
+                            <!-- New command -->
+                            <button
+                                class="flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-neutral-300 px-3 py-2 transition-colors hover:border-neutral-400 dark:border-neutral-600 dark:hover:border-neutral-500"
+                                @click="openCreateModal"
+                            >
+                                <u-icon name="i-lucide-plus" class="text-dimmed size-4" />
+                                <span class="text-dimmed text-xs">New command</span>
+                            </button>
+                        </div>
                     </div>
-                </ActionList>
+                </div>
+
+                <!-- Flat list: before system setup (legacy commands) -->
+                <div v-else class="space-y-2">
+                    <div
+                        v-for="cmd in wakeStore.commands"
+                        :key="cmd.name"
+                        class="bg-muted flex items-center gap-2 rounded-md px-3 py-2"
+                    >
+                        <span class="grow text-sm font-medium">{{ cmd.name }}</span>
+                        <u-badge
+                            :color="cmd.sampleCount >= REQUIRED_SAMPLES ? 'success' : 'warning'"
+                            variant="soft"
+                            :label="`${cmd.sampleCount}/${REQUIRED_SAMPLES}`"
+                            size="xs"
+                        />
+                        <u-button size="xs" variant="ghost" color="primary" @click="openEditModal(cmd.name)">
+                            Edit
+                        </u-button>
+                        <u-button size="xs" variant="ghost" color="error" @click="wakeStore.deleteCommand(cmd.name)">
+                            Delete
+                        </u-button>
+                    </div>
+
+                    <!-- New command -->
+                    <button
+                        class="flex w-full items-center justify-center gap-2 rounded-md border border-dashed border-neutral-300 px-3 py-2 transition-colors hover:border-neutral-400 dark:border-neutral-600 dark:hover:border-neutral-500"
+                        @click="openCreateModal"
+                    >
+                        <u-icon name="i-lucide-plus" class="text-dimmed size-4" />
+                        <span class="text-dimmed text-xs">New command</span>
+                    </button>
+                </div>
             </section>
 
             <!-- Dictation History -->
@@ -160,20 +239,45 @@
 </template>
 
 <script setup lang="ts">
-    import ActionList from '~/shared/ui/action-list/action-list.vue';
     import { RecordingFlow, type RecordingCommand } from '~/features/recording-flow';
     import { AudioMode, useAudioStore } from '~/entities/audio';
     import { usePlatformStore } from '~/entities/platform';
+    import { useSettingsStore } from '~/entities/settings';
     import {
         useWakeCommandsStore,
         WAKE_ACTION_OPTIONS,
         REQUIRED_SAMPLES,
+        BASE_COMMANDS,
+        buildBaseCommandName,
         type WakeActionType,
     } from '~/entities/wake-commands';
 
     const audioStore = useAudioStore();
     const platformStore = usePlatformStore();
+    const settingsStore = useSettingsStore();
     const wakeStore = useWakeCommandsStore();
+
+    // --- Command categorization ---
+    const baseCommandNames = computed(() => {
+        const names = new Set<string>();
+        for (const def of BASE_COMMANDS) {
+            names.add(buildBaseCommandName(settingsStore.assistantName, def.suffix));
+        }
+        return names;
+    });
+
+    const priemDef = BASE_COMMANDS.find(c => c.action === 'await_subcommand')!;
+    const priemCommandName = computed(() => buildBaseCommandName(settingsStore.assistantName, priemDef.suffix));
+
+    const systemCommands = computed(() =>
+        wakeStore.commands.filter(cmd => baseCommandNames.value.has(cmd.name) && cmd.name !== priemCommandName.value)
+    );
+
+    const priemCommand = computed(() => wakeStore.commands.find(cmd => cmd.name === priemCommandName.value) ?? null);
+
+    const userCommands = computed(() => wakeStore.commands.filter(cmd => !baseCommandNames.value.has(cmd.name)));
+
+    const hasSystemSetup = computed(() => systemCommands.value.length > 0 || priemCommand.value !== null);
 
     const isDev = import.meta.dev;
     const testResult = ref<string | null>(null);
@@ -182,7 +286,7 @@
     const modalOpen = ref(false);
     const modalStep = ref<'setup' | 'recording' | 'done'>('setup');
     const commandName = ref('');
-    const commandAction = ref<WakeActionType>('command_mode');
+    const commandAction = ref<WakeActionType>('await_subcommand');
     const isEditing = ref(false);
 
     const modalTitle = computed(() => (isEditing.value ? `Edit: ${commandName.value}` : 'New Command'));
@@ -202,15 +306,16 @@
     ]);
 
     const modes = [
-        { value: AudioMode.Idle, label: 'Idle' },
-        { value: AudioMode.Listening, label: 'Listening' },
+        { value: AudioMode.Off, label: 'Off' },
+        { value: AudioMode.Standby, label: 'Standby' },
         { value: AudioMode.Dictation, label: 'Dictation' },
         { value: AudioMode.Processing, label: 'Processing' },
+        { value: AudioMode.AwaitingSubcommand, label: 'Awaiting' },
     ] as const;
 
     function openCreateModal() {
         commandName.value = '';
-        commandAction.value = 'command_mode';
+        commandAction.value = 'await_subcommand';
         isEditing.value = false;
         modalStep.value = 'setup';
         modalOpen.value = true;

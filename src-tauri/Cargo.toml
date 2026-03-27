@@ -54,6 +54,7 @@ tauri-plugin-store = "2"
 linfa = "0.7"
 linfa-svm = "0.7"
 ndarray = "0.17"
+dtw_rs = "0.10"
 
 # Window state persistence
 tauri-plugin-window-state = "2"

@@ -1,11 +1,11 @@
 <template>
     <u-app>
-        <nuxt-layout>
+        <nuxt-layout :app-label="settingsStore.assistantName">
             <template #voice-status>
                 <div v-if="platformStore.isNativePlatform" class="flex items-center gap-3">
                     <div class="relative">
                         <div
-                            v-if="!audioStore.isIdle"
+                            v-if="!audioStore.isOff"
                             class="absolute -inset-1.5 animate-ping rounded-full opacity-20"
                             :class="stateConfig.pulse"
                         />
@@ -19,7 +19,7 @@
                         <p class="text-muted text-xs leading-tight">{{ stateConfig.description }}</p>
                     </div>
                     <u-button
-                        v-if="audioStore.isIdle"
+                        v-if="audioStore.isOff"
                         size="xs"
                         color="primary"
                         :disabled="!canStart"
@@ -55,9 +55,9 @@
 
     const stateConfig = computed(() => {
         switch (audioStore.mode) {
-            case AudioMode.Listening:
+            case AudioMode.Standby:
                 return {
-                    label: 'Listening...',
+                    label: 'Standby',
                     description: 'Waiting for wake word',
                     logoColor: 'text-blue-500',
                     pulse: 'bg-blue-500',
@@ -75,6 +75,13 @@
                     description: 'Recognizing speech',
                     logoColor: 'text-amber-500',
                     pulse: 'bg-amber-500',
+                };
+            case AudioMode.AwaitingSubcommand:
+                return {
+                    label: 'Command?',
+                    description: 'Say a subcommand',
+                    logoColor: 'text-violet-500',
+                    pulse: 'bg-violet-500',
                 };
             default:
                 return {

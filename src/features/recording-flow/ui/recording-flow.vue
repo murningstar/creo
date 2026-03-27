@@ -39,12 +39,13 @@
 
             <u-button
                 size="sm"
-                :color="wakeStore.isRecording ? 'error' : 'primary'"
-                :disabled="wakeStore.isRecording"
+                :color="wakeStore.isRecording ? 'error' : canAdvance ? 'neutral' : 'primary'"
+                :variant="canAdvance ? 'outline' : 'solid'"
+                :disabled="wakeStore.isRecording || canAdvance"
                 icon="i-lucide-mic"
                 @click="record"
             >
-                {{ wakeStore.isRecording ? 'Listening...' : 'Record Sample' }}
+                {{ wakeStore.isRecording ? 'Listening...' : canAdvance ? 'All recorded' : 'Record Sample' }}
             </u-button>
 
             <u-alert
@@ -113,6 +114,7 @@
     async function record() {
         const cmd = currentCommand.value;
         if (!cmd) return;
+        if (samples.value.length >= (cmd.requiredSamples ?? REQUIRED_SAMPLES)) return;
 
         const isFirst =
             !samplesPerCommand.value.has(currentIndex.value) ||

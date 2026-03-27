@@ -5,7 +5,7 @@ mod system;
 
 use std::sync::Arc;
 
-use tauri::Emitter;
+use tauri::{Emitter, Manager, RunEvent};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -47,6 +47,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::start_listening,
             commands::start_dictation,
+            commands::transition_to_dictation,
+            commands::transition_to_standby,
+            commands::get_current_mode,
             commands::stop_listening,
             commands::test_capture,
             commands::check_models,
@@ -67,9 +70,11 @@ pub fn run() {
 
             // Background model file polling (5s interval)
             let handle = app.handle().clone();
+            let polling_shutdown = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let polling_flag = polling_shutdown.clone();
             std::thread::spawn(move || {
                 let mut prev_ready = false;
-                loop {
+                while !polling_flag.load(std::sync::atomic::Ordering::Relaxed) {
                     let status = commands::check_models();
                     if status.all_present != prev_ready {
                         prev_ready = status.all_present;
@@ -78,9 +83,24 @@ pub fn run() {
                     std::thread::sleep(std::time::Duration::from_secs(5));
                 }
             });
+            // Store polling shutdown flag for exit handler
+            app.manage(polling_shutdown);
 
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            if let RunEvent::Exit = event {
+                // Stop model polling thread
+                let polling = app.state::<std::sync::Arc<std::sync::atomic::AtomicBool>>();
+                polling.store(true, std::sync::atomic::Ordering::Relaxed);
+
+                // Stop audio pipeline
+                let handle = app.state::<Arc<audio::PipelineHandle>>();
+                handle.request_shutdown();
+                let _ = handle.join_threads();
+                log::info!("Pipeline shutdown complete");
+            }
+        });
 }
