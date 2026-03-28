@@ -48,15 +48,27 @@ Tensor interface (v6):
 | Parakeet TDT 0.6B v3 INT8 | Main STT (ONNX Runtime, user-selectable) | ~640 MB     | ONNX        |
 | Whisper models via ct2rs  | Main STT (CTranslate2, user-selectable)  | 500MB-1.5GB | CTranslate2 |
 
-## GPU Compatibility
+## Hardware Acceleration Coverage
 
-| GPU                    | CTranslate2 (ct2rs) | Parakeet (ONNX Runtime) |
-| ---------------------- | ------------------- | ----------------------- |
-| NVIDIA (CUDA)          | ✓                   | ✓                       |
-| AMD (Windows/DirectML) | ✗                   | ✓                       |
-| AMD (Linux/ROCm)       | ✗                   | ✓                       |
-| Intel iGPU             | ✗                   | ✓ (DirectML/OpenVINO)   |
-| CPU only               | ✓ (int8)            | ✓                       |
+| Конфигурация                     | Текущее ускорение                                             | Выжат максимум?      | Что нужно для максимума                                                                                                                                                                              |
+| -------------------------------- | ------------------------------------------------------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| NVIDIA GPU (любая)               | ✅ CUDA через ONNX Runtime (Parakeet) + whisper.cpp (Whisper) | ✅ Да                | —                                                                                                                                                                                                    |
+| AMD GPU Windows                  | ✅ DirectML через ONNX Runtime (Parakeet)                     | ✅ Да                | —                                                                                                                                                                                                    |
+| AMD GPU Linux                    | ✅ ROCm/Vulkan через ONNX Runtime                             | ✅ Да                | —                                                                                                                                                                                                    |
+| Intel iGPU                       | ✅ DirectML/OpenVINO через ONNX Runtime                       | ✅ Да                | —                                                                                                                                                                                                    |
+| Apple Silicon                    | ✅ CoreML (Parakeet) + Metal (whisper.cpp)                    | ✅ Да                | —                                                                                                                                                                                                    |
+| AMD Ryzen CPU (без GPU)          | ✅ ONNX Runtime CPU (AVX2)                                    | ⚠️ ~90%              | Нет Zen-оптимизированного BLAS в экосистеме. AOCL существует, но ни один STT engine не использует. Прирост ~10-20% потенциально.                                                                     |
+| Intel Core 11+ gen CPU (без GPU) | ✅ ONNX Runtime CPU (AVX-512)                                 | ⚠️ ~70-80%           | CTranslate2 + Intel MKL даёт 2-5x ускорение Whisper на Intel CPU через специализированные матричные инструкции (AVX-512, AMX). Интеграция через ct2rs — отложена, не критична пока Parakeet primary. |
+| Intel Core 8-10 gen CPU          | ✅ ONNX Runtime CPU (AVX2)                                    | ⚠️ ~80%              | MKL даёт умеренный прирост через AVX2 оптимизации.                                                                                                                                                   |
+| Старые CPU (<8th gen)            | ✅ ONNX Runtime CPU                                           | ✅ Потолок достигнут | Нет аппаратных инструкций для дальнейшего ускорения.                                                                                                                                                 |
+
+### Потенциал для будущей оптимизации (ct2rs)
+
+**Что:** CTranslate2 через ct2rs — ускоренный inference Whisper моделей с Intel MKL.
+**Кого оптимизирует:** Intel Core 8+ gen на CPU-only (без GPU). ~2-5x ускорение Whisper.
+**Кого НЕ затрагивает:** AMD Ryzen (MKL не оптимизирован для AMD), любая конфигурация с GPU (GPU и так быстрее).
+**Статус:** Отложен. Parakeet через ONNX Runtime на CPU уже 30x real-time — быстрее чем ct2rs + Whisper + MKL. ct2rs актуален только для Whisper fallback (99 languages) на Intel CPU без GPU.
+**Когда делать:** Когда все основные фичи реализованы и нужна финальная оптимизация CPU performance для Intel-only пользователей.
 
 ## Auto-Configuration (первый запуск)
 
