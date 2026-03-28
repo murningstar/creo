@@ -4,7 +4,7 @@
 
 Десктопный голосовой помощник (Windows + Linux, macOS позже) на Nuxt 3 + Tauri 2 с Feature-Sliced Design архитектурой. Полностью self-hosted, все ML модели работают локально.
 
-**Статус:** MVP аудио-пайплайн реализован (cpal → VAD → whisper-rs). Диктовка через whisper-rs как placeholder до интеграции ct2rs/parakeet-rs.
+**Статус:** Аудио-пайплайн: cpal → Silero VAD v6 → Google speech-embedding + DTW wake word detection → whisper-rs base (dictation placeholder до интеграции ct2rs/parakeet-rs). State machine: Off/Standby/Dictation/Processing/AwaitingSubcommand. Mode transitions без restart pipeline.
 
 ---
 
@@ -14,17 +14,18 @@
 
 ### Wake commands (русский язык)
 
-| Команда              | Действие                                               | Завершение                |
-| -------------------- | ------------------------------------------------------ | ------------------------- |
-| **"Крео, приём"**    | Command mode — MVP: активация Kando (wheel menu)       | Автоматически             |
-| **"Крео, вписывай"** | Dictation mode — непрерывная диктовка в активный input | По команде "Крео, готово" |
-| **"Крео, готово"**   | Завершение диктовки                                    | —                         |
+| Команда              | Действие                                                            | Завершение                 |
+| -------------------- | ------------------------------------------------------------------- | -------------------------- |
+| **"Крео, приём"**    | AwaitingSubcommand — ожидание подкоманды (DTW / Vosk / LLM cascade) | Таймаут или "Крео, отмена" |
+| **"Крео, вписывай"** | Dictation mode — непрерывная диктовка в активный input              | По команде "Крео, готово"  |
+| **"Крео, готово"**   | Завершение диктовки                                                 | —                          |
+| **"Крео, отмена"**   | Отмена диктовки (без injection текста)                              | —                          |
 
 ### Функциональные возможности
 
-1. **Wake word detection** — активация голосом через Silero VAD + whisper-rs tiny
+1. **Wake word detection** — активация голосом через Silero VAD v6 + Google speech-embedding (96-dim ONNX) + DTW frame-level matching
 2. **Dictation** — диктовка текста с вводом через enigo (SendInput / clipboard+paste)
-3. **Voice commands** — голосовые команды (MVP: запуск Kando)
+3. **Voice commands** — голосовые подкоманды после "приём" (AwaitingSubcommand mode)
 4. **Auto-configuration** — автоопределение железа, подбор оптимальной модели
 5. **History** — история команд/диктовок с настраиваемым retention
 6. **Hotkey fallback** — горячая клавиша как альтернатива wake word
@@ -47,11 +48,13 @@
 ### Rust Backend (src-tauri/)
 
 - **cpal** — захват микрофона
-- **Silero VAD** (ONNX Runtime / `ort`) — always-on voice activity detection (~0.4% CPU)
-- **whisper-rs** (whisper.cpp, GGML tiny model) — wake word detection only
+- **Silero VAD v6** (ONNX Runtime / `ort`) — always-on voice activity detection (~0.4% CPU)
+- **Google speech-embedding** (mel + embedding ONNX) — 96-dim wake word embeddings, language-agnostic
+- **dtw_rs** — DTW frame-level matching для wake word detection
+- **whisper-rs** (whisper.cpp, GGML base model) — dictation placeholder (текущий STT)
 - **Main STT — два движка, user-selectable:**
     - **CTranslate2 via ct2rs** — для NVIDIA GPU + CPU (скорость faster-whisper, CTranslate2 модели)
-    - **Parakeet TDT 0.6B via parakeet-rs** — для AMD/Intel GPU (DirectML/Vulkan) + CPU (ONNX модель ~600MB, лучший WER для русского)
+    - **Parakeet TDT 0.6B via parakeet-rs** — для AMD/Intel GPU (DirectML/Vulkan) + CPU (ONNX модель ~640MB INT8, лучший WER)
 - **enigo** — ввод текста в активное приложение (гибрид: SendInput < 100 символов, clipboard+paste для длинного)
 - **rodio/cpal** — звуковой feedback
 
@@ -63,7 +66,9 @@
 > **Evolution plan:** [`.claude/docs/evolution-plan.md`](.claude/docs/evolution-plan.md) — tiered cascade architecture, модели по ролям, эволюционный путь от текущего состояния к целевому. **Сверяться:** при любых изменениях в audio pipeline, при анализе текущего состояния точек соприкосновения технологий, при неполадках (плохое определение wake words, плохая транскрипция, false positives).
 > **Architecture audit:** [`.claude/docs/architecture-audit.md`](.claude/docs/architecture-audit.md) — 25 findings от 3 independent auditors (2026-03-27). Статусы обновляются по мере фиксов. **Сверяться:** перед любой cross-cutting доработкой, при архитектурных решениях.
 
-Краткая схема: Микрофон (cpal) → Silero VAD (ort/ONNX) → speech buffer → whisper-rs → fuzzy wake word match / dictation text → Tauri events → Vue frontend. Три потока: capture, VAD processing, whisper transcription.
+Краткая схема: Микрофон (cpal) → Silero VAD v6 (ort/ONNX) → speech buffer → [wake words: Google embedding + DTW] / [dictation: whisper-rs base] → Tauri events → Vue frontend. Три потока: capture, VAD processing, transcription (DTW + whisper).
+
+> **ВАЖНО:** При изменении pipeline поведения — обновлять CLAUDE.md, audio-pipeline.md и evolution-plan.md **в том же коммите**. Stale docs = stale decisions.
 
 ---
 
@@ -190,7 +195,7 @@ app → pages → widgets → features → entities → shared
 
 **Типы:**
 
-- PascalCase: `AudioMode`, `CurrentNativePlatform`, `WakeCommand`
+- PascalCase: `AudioMode`, `CurrentNativePlatform`, `WakeAction`
 
 ### Rust Backend (src-tauri/)
 
@@ -267,6 +272,17 @@ pnpm format          # Prettier
 ---
 
 ## Important Rules
+
+### Docs Sync Protocol
+
+**При изменении pipeline поведения, state machine, моделей, persistence — обновлять ВСЕ затронутые документы в том же коммите:**
+
+- `CLAUDE.md` — project spec (authoritative)
+- `.claude/docs/audio-pipeline.md` — pipeline diagram, models table
+- `.claude/docs/evolution-plan.md` — architecture decisions, model choices
+- `README.md` — user-facing model download instructions
+
+Stale docs = stale decisions = bugs from misalignment.
 
 ### UX/UI Protocol
 

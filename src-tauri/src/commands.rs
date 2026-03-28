@@ -43,7 +43,7 @@ pub fn check_models() -> ModelStatus {
 
     let models = vec![
         ModelInfo {
-            name: "Silero VAD v5".to_string(),
+            name: "Silero VAD v6".to_string(),
             filename: VAD_MODEL_FILENAME.to_string(),
             path: vad_path.to_string_lossy().to_string(),
             exists: vad_path.exists(),
