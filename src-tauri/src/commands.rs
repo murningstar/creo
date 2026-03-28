@@ -16,6 +16,7 @@ const VAD_MODEL_FILENAME: &str = "silero_vad_v6.onnx";
 const MEL_MODEL_FILENAME: &str = "melspectrogram.onnx";
 const EMB_MODEL_FILENAME: &str = "embedding_model.onnx";
 const WHISPER_DICTATION_MODEL_FILENAME: &str = "ggml-base.bin";
+const PARAKEET_MODEL_DIR_NAME: &str = "parakeet-tdt";
 const WAKEWORDS_DIR_NAME: &str = "wakewords";
 
 /// Platform-specific base data directory (ASCII-safe on Windows).
@@ -82,6 +83,18 @@ pub fn check_models() -> ModelStatus {
 }
 
 /// Shared pipeline startup logic: resolve model paths, validate, start pipeline in given mode.
+/// Detect which dictation STT engine to use based on available models.
+/// Priority: Parakeet (if model dir exists) > Whisper (fallback).
+/// TODO: make this user-selectable via settings instead of auto-detect.
+fn detect_stt_engine() -> &'static str {
+    let parakeet_dir = get_models_dir().join(PARAKEET_MODEL_DIR_NAME);
+    if parakeet_dir.exists() && parakeet_dir.is_dir() {
+        "parakeet"
+    } else {
+        "whisper"
+    }
+}
+
 fn start_pipeline_with_mode(
     app: AppHandle,
     state: &Arc<PipelineHandle>,
@@ -91,16 +104,52 @@ fn start_pipeline_with_mode(
     let vad_path = dir.join(VAD_MODEL_FILENAME);
     let mel_path = dir.join(MEL_MODEL_FILENAME);
     let emb_path = dir.join(EMB_MODEL_FILENAME);
-    let dictation_path = dir.join(WHISPER_DICTATION_MODEL_FILENAME);
 
     let wakewords_dir = get_creo_data_dir().join(WAKEWORDS_DIR_NAME);
 
-    if !vad_path.exists() || !mel_path.exists() || !emb_path.exists() || !dictation_path.exists() {
+    if !vad_path.exists() || !mel_path.exists() || !emb_path.exists() {
         return Err(format!(
-            "Models not found. Place them in: {}",
+            "Core models not found. Place them in: {}",
             dir.to_string_lossy()
         ));
     }
+
+    let engine_type = detect_stt_engine();
+    log::info!("STT engine: {}", engine_type);
+
+    // Build a factory closure that creates the engine on the transcription thread.
+    // This avoids Send issues — the engine is created where it will be used.
+    let dictation_engine_factory: Box<
+        dyn FnOnce() -> anyhow::Result<Box<dyn crate::audio::stt::DictationEngine>> + Send,
+    > = match engine_type {
+        "parakeet" => {
+            let model_dir = dir
+                .join(PARAKEET_MODEL_DIR_NAME)
+                .to_string_lossy()
+                .to_string();
+            Box::new(move || {
+                let engine = crate::audio::stt::ParakeetEngine::new(&model_dir)?;
+                Ok(Box::new(engine) as Box<dyn crate::audio::stt::DictationEngine>)
+            })
+        }
+        _ => {
+            let model_path = dir
+                .join(WHISPER_DICTATION_MODEL_FILENAME)
+                .to_string_lossy()
+                .to_string();
+            if !PathBuf::from(&model_path).exists() {
+                return Err(format!(
+                    "Whisper dictation model not found: {}",
+                    model_path
+                ));
+            }
+            // TODO: language should come from settings
+            Box::new(move || {
+                let engine = crate::audio::stt::WhisperEngine::new(&model_path, "ru")?;
+                Ok(Box::new(engine) as Box<dyn crate::audio::stt::DictationEngine>)
+            })
+        }
+    };
 
     pipeline::start_pipeline(
         app,
@@ -110,7 +159,7 @@ fn start_pipeline_with_mode(
         mel_path.to_string_lossy().to_string(),
         emb_path.to_string_lossy().to_string(),
         wakewords_dir.to_string_lossy().to_string(),
-        dictation_path.to_string_lossy().to_string(),
+        dictation_engine_factory,
     )
     .map_err(|e| e.to_string())
 }

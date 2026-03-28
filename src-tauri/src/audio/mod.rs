@@ -1,5 +1,6 @@
 pub mod capture;
 pub mod pipeline;
+pub mod stt;
 pub mod transcriber;
 pub mod vad;
 pub mod wakeword;

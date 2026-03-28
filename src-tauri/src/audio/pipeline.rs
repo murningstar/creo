@@ -7,7 +7,7 @@ use crossbeam_channel::{bounded, Receiver, Sender};
 use tauri::{AppHandle, Emitter};
 
 use super::capture::AudioResampler;
-use super::transcriber::Transcriber;
+use super::stt::DictationEngine;
 use super::vad::SileroVad;
 use super::wakeword::WakeWordDetector;
 use super::{
@@ -32,7 +32,7 @@ pub fn start_pipeline(
     mel_model_path: String,
     emb_model_path: String,
     wakewords_dir: String,
-    dictation_model_path: String,
+    dictation_engine_factory: Box<dyn FnOnce() -> Result<Box<dyn DictationEngine>> + Send>,
 ) -> Result<()> {
     handle.transition_mode(&app_handle, initial_mode);
 
@@ -45,7 +45,7 @@ pub fn start_pipeline(
     let (result_tx, result_rx): (Sender<TranscriptionResult>, Receiver<TranscriptionResult>) =
         bounded(TRANSCRIPTION_CHANNEL_CAPACITY);
 
-    // Transcription thread (wake word via embedding+DTW, dictation via whisper)
+    // Transcription thread (wake word via embedding+DTW, dictation via STT engine)
     let app2 = app_handle.clone();
     let handle2 = handle.clone();
     let transcription_handle = thread::spawn(move || {
@@ -57,7 +57,7 @@ pub fn start_pipeline(
             &mel_model_path,
             &emb_model_path,
             &wakewords_dir,
-            &dictation_model_path,
+            dictation_engine_factory,
         ) {
             log::error!("Transcription thread error: {}", e);
         }
@@ -261,12 +261,12 @@ fn transcription_thread(
     mel_model_path: &str,
     emb_model_path: &str,
     wakewords_dir: &str,
-    dictation_model_path: &str,
+    dictation_engine_factory: Box<dyn FnOnce() -> Result<Box<dyn DictationEngine>> + Send>,
 ) -> Result<()> {
     let mut wake_detector = WakeWordDetector::new(mel_model_path, emb_model_path, wakewords_dir)?;
     log::info!("Wake word detector loaded (embedding+DTW)");
-    let mut dictation_transcriber = Transcriber::new(dictation_model_path)?;
-    log::info!("Dictation model loaded: {}", dictation_model_path);
+    let mut dictation_engine = dictation_engine_factory()?;
+    log::info!("Dictation engine loaded: {}", dictation_engine.name());
 
     loop {
         if handle.is_shutdown() {
@@ -306,20 +306,18 @@ fn transcription_thread(
                         ) {
                             let _ = result_tx
                                 .send(TranscriptionResult::WakeAction(detection.action));
-                            dictation_transcriber.reset_context();
+                            dictation_engine.reset_context();
                             continue;
                         }
                     }
                 }
 
                 // Not a stop command — transcribe as dictation text
-                // TODO: language should come from settings, not hardcoded
-                match dictation_transcriber.transcribe(&audio, "ru") {
-                    Ok(text) => {
-                        let trimmed = text.trim().to_string();
-                        if !trimmed.is_empty() {
+                match dictation_engine.transcribe(&audio) {
+                    Ok(result) => {
+                        if !result.text.is_empty() {
                             let _ = result_tx.send(TranscriptionResult::DictationText {
-                                text: trimmed,
+                                text: result.text,
                                 is_final: true,
                             });
                         }

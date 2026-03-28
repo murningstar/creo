@@ -50,6 +50,9 @@ enigo = "0.6"
 # Settings persistence
 tauri-plugin-store = "2"
 
+# Parakeet TDT (ONNX-based STT, user-selectable alongside Whisper)
+parakeet-rs = "0.3"
+
 # Wake word / command classification (embedding + SVM)
 linfa = "0.7"
 linfa-svm = "0.7"
