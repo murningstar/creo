@@ -70,6 +70,15 @@ Tensor interface (v6):
 **Статус:** Отложен. Parakeet через ONNX Runtime на CPU уже 30x real-time — быстрее чем ct2rs + Whisper + MKL. ct2rs актуален только для Whisper fallback (99 languages) на Intel CPU без GPU.
 **Когда делать:** Когда все основные фичи реализованы и нужна финальная оптимизация CPU performance для Intel-only пользователей.
 
+**Минусы внедрения ct2rs (причины отложения):**
+
+- **ndarray version conflict:** ct2rs использует ndarray 0.16, наш проект — 0.17. Cargo скомпилирует обе версии, но типы несовместимы между ними + bloat бинарника.
+- **OpenMP runtime conflict risk:** CTranslate2 с Intel MKL линкует Intel OpenMP (iomp5), ONNX Runtime может линковать MSVC OpenMP (vcomp). Два OpenMP runtime в одном процессе = потенциальные deadlocks. Решаемо через static linking, но добавляет complexity.
+- **Context carry-over не прокинут:** ct2rs high-level `Whisper::generate()` не принимает prompt tokens — строит prompt внутри (только language + task). Для cross-segment coherence нужен форк или low-level API.
+- **Тяжёлый build:** CMake компилирует CTranslate2 из C++ source (5-15 минут first build). Третий нативный build chain (whisper.cpp + ONNX Runtime + CTranslate2).
+- **Отдельный формат моделей:** CTranslate2 модели ≠ GGML модели. Нужна конвертация через Python (`ct2-transformers-converter`). Пользователь не может переиспользовать whisper-rs модели.
+- **Бинарник:** +30-80MB к размеру приложения (CTranslate2 runtime).
+
 ## Auto-Configuration (первый запуск)
 
 1. Определяем GPU (vendor, VRAM), CPU, RAM
