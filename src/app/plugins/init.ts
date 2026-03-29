@@ -20,7 +20,7 @@ export default defineNuxtPlugin(async () => {
 
         // Auto-start: if all models present and pipeline not already running, go to Standby
         if (audioStore.isOff && audioStore.modelStatus?.allPresent) {
-            audioStore.startListening();
+            audioStore.startListening(settingsStore.sttEngine);
         }
 
         // Register persisted hotkey (overrides Rust default if different)

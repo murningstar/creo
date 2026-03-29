@@ -12,6 +12,7 @@
     "app": {
         "windows": [
             {
+                "label": "main",
                 "title": "Creo",
                 "width": 800,
                 "height": 600,
@@ -19,6 +20,23 @@
                 "minHeight": 400,
                 "resizable": true,
                 "fullscreen": false
+            },
+            {
+                "label": "overlay",
+                "url": "/overlay",
+                "title": "",
+                "width": 60,
+                "height": 60,
+                "transparent": true,
+                "decorations": false,
+                "alwaysOnTop": true,
+                "skipTaskbar": true,
+                "shadow": false,
+                "resizable": false,
+                "closable": false,
+                "visible": false,
+                "focus": false,
+                "focusable": false
             }
         ],
         "security": {

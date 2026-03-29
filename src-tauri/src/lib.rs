@@ -58,6 +58,10 @@ pub fn run() {
             commands::record_wake_sample,
             commands::get_wake_commands,
             commands::delete_wake_command,
+            commands::get_subcommands,
+            commands::create_subcommand,
+            commands::delete_subcommand,
+            commands::record_subcommand_sample,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -85,6 +89,25 @@ pub fn run() {
             });
             // Store polling shutdown flag for exit handler
             app.manage(polling_shutdown);
+
+            // Position overlay window in bottom-right corner
+            if let Some(overlay) = app.get_webview_window("overlay") {
+                if let Ok(monitor) = overlay.current_monitor() {
+                    if let Some(monitor) = monitor {
+                        let screen = monitor.size();
+                        let scale = monitor.scale_factor();
+                        let margin = (12.0 * scale) as i32;
+                        let size = (60.0 * scale) as i32;
+                        let x = (screen.width as i32 / scale as i32) - size - margin;
+                        let y = (screen.height as i32 / scale as i32) - size - margin;
+                        let _ = overlay.set_position(tauri::Position::Logical(
+                            tauri::LogicalPosition::new(x as f64, y as f64),
+                        ));
+                    }
+                }
+                // Enable click-through by default
+                let _ = overlay.set_ignore_cursor_events(true);
+            }
 
             Ok(())
         })

@@ -2,6 +2,7 @@ import type { KeyCombo } from '~/shared/ui/keystroke-recorder/model/types';
 
 export type TextInputMethod = 'paste' | 'type';
 export type HotkeyMode = 'hold' | 'toggle';
+export type SttEngine = 'auto' | 'parakeet' | 'whisper';
 
 export const DEFAULT_ASSISTANT_NAME = 'Крео';
 
@@ -20,6 +21,7 @@ export interface AppSettings {
     historyRetentionDays: number;
     hotkey: KeyCombo | null;
     hotkeyMode: HotkeyMode;
+    sttEngine: SttEngine;
 }
 
 /** Store keys — single source of truth for Tauri Store key names. */
@@ -29,6 +31,7 @@ export const STORE_KEY = {
     historyRetentionDays: 'historyRetentionDays',
     hotkey: 'hotkey',
     hotkeyMode: 'hotkeyMode',
+    sttEngine: 'sttEngine',
 } as const satisfies Record<keyof AppSettings, string>;
 
 export const STORE_FILENAME = 'settings.json';
@@ -39,4 +42,5 @@ export const DEFAULT_SETTINGS: AppSettings = {
     historyRetentionDays: 30,
     hotkey: DEFAULT_HOTKEY,
     hotkeyMode: 'hold',
+    sttEngine: 'auto',
 };

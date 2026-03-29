@@ -23,7 +23,7 @@
                         size="xs"
                         color="primary"
                         :disabled="!canStart"
-                        @click="audioStore.startListening()"
+                        @click="audioStore.startListening(settingsStore.sttEngine)"
                     >
                         Start
                     </u-button>

@@ -5,6 +5,8 @@ import type {
     AudioErrorEvent,
     AudioStateEvent,
     ModelStatus,
+    SttEngineResolvedEvent,
+    SubcommandMatchEvent,
     TranscriptionEvent,
     VadStateEvent,
     WakeCommandEvent,
@@ -18,12 +20,16 @@ export const useAudioStore = defineStore('audio', () => {
     const _error = ref<string | null>(null);
     const _unlisten = ref<UnlistenFn[]>([]);
     const _modelStatus = ref<ModelStatus | null>(null);
+    const _activeSttEngine = ref<string | null>(null);
+    const _lastSubcommandMatch = ref<SubcommandMatchEvent | null>(null);
 
     const mode = readonly(_mode);
     const isSpeech = readonly(_isSpeech);
     const lastTranscription = readonly(_lastTranscription);
     const error = readonly(_error);
     const modelStatus = readonly(_modelStatus);
+    const activeSttEngine = readonly(_activeSttEngine);
+    const lastSubcommandMatch = readonly(_lastSubcommandMatch);
 
     const isStandby = computed<boolean>(() => _mode.value === AudioMode.Standby);
     const isDictation = computed<boolean>(() => _mode.value === AudioMode.Dictation);
@@ -36,10 +42,10 @@ export const useAudioStore = defineStore('audio', () => {
         _mode.value = newMode;
     };
 
-    async function startListening() {
+    async function startListening(sttEngine?: string) {
         _error.value = null;
         try {
-            await invoke('start_listening');
+            await invoke('start_listening', { sttEngine: sttEngine ?? 'auto' });
         } catch (e) {
             _error.value = String(e);
         }
@@ -109,6 +115,16 @@ export const useAudioStore = defineStore('audio', () => {
             listen<ModelStatus>('models-status-changed', event => {
                 _modelStatus.value = event.payload;
             }),
+            listen<SttEngineResolvedEvent>('stt-engine-resolved', event => {
+                _activeSttEngine.value = event.payload.engine;
+            }),
+            listen<SubcommandMatchEvent>('subcommand-match', event => {
+                _lastSubcommandMatch.value = event.payload;
+                console.log('Subcommand match:', event.payload.command, event.payload.action);
+            }),
+            listen('subcommand-timeout', () => {
+                console.log('Subcommand timeout → Standby');
+            }),
         ]);
 
         _unlisten.value = listeners;
@@ -127,6 +143,8 @@ export const useAudioStore = defineStore('audio', () => {
         lastTranscription,
         error,
         modelStatus,
+        activeSttEngine,
+        lastSubcommandMatch,
         isStandby,
         isDictation,
         isProcessing,

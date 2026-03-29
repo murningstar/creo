@@ -29,6 +29,18 @@ export interface AudioErrorEvent {
     message: string;
 }
 
+export interface SttEngineResolvedEvent {
+    engine: string;
+}
+
+export interface SubcommandMatchEvent {
+    command: string;
+    action: string;
+    confidence: number;
+    tier: number;
+    params: Record<string, string>;
+}
+
 export interface ModelInfo {
     name: string;
     filename: string;

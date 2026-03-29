@@ -19,46 +19,17 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use ndarray::Array1;
-use ort::session::Session;
-use ort::value::Tensor;
 
-use dtw_rs::Solution;
-
+use super::embedding::{
+    dtw_normalized_distance, EmbeddingExtractor, FrameSequence,
+    DTW_DISTANCE_THRESHOLD, EMBEDDING_DIM, MIN_DETECTION_FRAMES,
+};
 use super::WakeAction;
-
-// Google speech-embedding model constants
-const EMBEDDING_DIM: usize = 96;
-const EMBEDDING_WINDOW: usize = 76; // mel frames per embedding input
-const EMBEDDING_STRIDE: usize = 8; // mel frames between consecutive embeddings
-const MEL_BINS: usize = 32;
-
-/// Minimum audio length in samples (16kHz) to guarantee at least one embedding.
-/// 76 mel frames × 160 samples/frame (hop_length) + 512 (n_fft) = 12672.
-/// Rounded up to 13000 for safety margin.
-const MIN_AUDIO_SAMPLES: usize = 13000;
-
-/// DTW: maximum normalized cosine distance for a match.
-/// Each frame pair has cosine distance in [0, 2]. Normalized DTW divides by path length.
-/// Calibrated from real data: true matches ≈ 0.03-0.07, false positives ≈ 0.19+.
-/// 0.15 gives clear separation: true matches pass, random speech rejected.
-const DTW_DISTANCE_THRESHOLD: f32 = 0.15;
-
-/// Minimum number of embedding frames for DTW detection.
-/// Wake words are multi-word phrases (~1-2s speech). Short inputs (<7 frames ≈ <600ms)
-/// produce unreliable DTW distances and cause false positives.
-const MIN_DETECTION_FRAMES: usize = 7;
-
-/// DTW: Sakoe-Chiba band width. Limits how far alignment can deviate from diagonal.
-/// For short sequences (5-15 frames), 3 allows ±3 frame drift (variable speaking speed).
-/// Dynamically clamped to max(len_x, len_y) - 1 to avoid panic on short inputs.
-const DTW_BAND_WIDTH: usize = 3;
 
 /// Cosine similarity threshold for centroid fallback (old .emb-only samples).
 const CENTROID_THRESHOLD: f32 = 0.7;
-
-type FrameSequence = Vec<[f32; EMBEDDING_DIM]>;
 
 pub struct DetectionResult {
     pub action: WakeAction,
@@ -67,8 +38,7 @@ pub struct DetectionResult {
 }
 
 pub struct WakeWordDetector {
-    mel_session: Session,
-    emb_session: Session,
+    extractor: EmbeddingExtractor,
     /// Per-command frame sequences: each sample stored as a sequence of 96-dim frames.
     /// Used for DTW matching (primary path).
     frame_references: HashMap<String, Vec<FrameSequence>>,
@@ -86,19 +56,7 @@ impl WakeWordDetector {
         emb_model_path: &str,
         references_dir: &str,
     ) -> Result<Self> {
-        let mel_session = Session::builder()
-            .map_err(|e| anyhow!("{e}"))?
-            .with_intra_threads(1)
-            .map_err(|e| anyhow!("{e}"))?
-            .commit_from_file(mel_model_path)
-            .context("Failed to load melspectrogram model")?;
-
-        let emb_session = Session::builder()
-            .map_err(|e| anyhow!("{e}"))?
-            .with_intra_threads(1)
-            .map_err(|e| anyhow!("{e}"))?
-            .commit_from_file(emb_model_path)
-            .context("Failed to load embedding model")?;
+        let extractor = EmbeddingExtractor::new(mel_model_path, emb_model_path)?;
 
         let references_dir = PathBuf::from(references_dir);
         let frame_references = Self::load_all_frame_references(&references_dir)?;
@@ -128,8 +86,7 @@ impl WakeWordDetector {
         }
 
         Ok(Self {
-            mel_session,
-            emb_session,
+            extractor,
             frame_references,
             centroids,
             action_map,
@@ -140,7 +97,7 @@ impl WakeWordDetector {
     /// Detect command in audio segment (16kHz mono f32).
     /// Primary: DTW frame-level matching. Fallback: centroid cosine similarity.
     pub fn detect(&mut self, audio: &[f32]) -> Option<DetectionResult> {
-        let input_frames = match self.extract_frame_embeddings(audio) {
+        let input_frames = match self.extractor.extract_frame_embeddings(audio) {
             Ok(frames) if !frames.is_empty() => frames,
             Ok(_) => return None,
             Err(e) => {
@@ -239,7 +196,7 @@ impl WakeWordDetector {
 
     /// Extract a single mean embedding from audio (average of all frame embeddings).
     pub fn extract_mean_embedding(&mut self, audio: &[f32]) -> Result<Array1<f32>> {
-        let embeddings = self.extract_frame_embeddings(audio)?;
+        let embeddings = self.extractor.extract_frame_embeddings(audio)?;
         if embeddings.is_empty() {
             return Err(anyhow!("No embeddings extracted"));
         }
@@ -262,51 +219,9 @@ impl WakeWordDetector {
         Ok(mean)
     }
 
-    /// Extract per-frame embeddings from audio (16kHz mono f32).
-    /// Short audio is zero-padded to minimum length.
-    fn extract_frame_embeddings(&mut self, audio: &[f32]) -> Result<FrameSequence> {
-        // Pad short audio with silence
-        let padded;
-        let audio = if audio.len() < MIN_AUDIO_SAMPLES {
-            padded = {
-                let mut buf = audio.to_vec();
-                buf.resize(MIN_AUDIO_SAMPLES, 0.0);
-                buf
-            };
-            &padded
-        } else {
-            audio
-        };
-
-        // Step 1: mel spectrogram
-        let mel = self.compute_mel(audio)?;
-        let n_frames = mel.len() / MEL_BINS;
-
-        if n_frames < EMBEDDING_WINDOW {
-            return Ok(Vec::new());
-        }
-
-        // Step 2: sliding window → embeddings
-        let mut embeddings = Vec::new();
-        let mut offset = 0;
-
-        while offset + EMBEDDING_WINDOW <= n_frames {
-            let start = offset * MEL_BINS;
-            let end = (offset + EMBEDDING_WINDOW) * MEL_BINS;
-            let window = &mel[start..end];
-
-            let emb = self.compute_embedding(window)?;
-            embeddings.push(emb);
-
-            offset += EMBEDDING_STRIDE;
-        }
-
-        Ok(embeddings)
-    }
-
     /// Save a reference for a command: both frame sequence (.frames) and mean embedding (.emb).
     pub fn save_reference(&mut self, command_name: &str, audio: &[f32]) -> Result<PathBuf> {
-        let frames = self.extract_frame_embeddings(audio)?;
+        let frames = self.extractor.extract_frame_embeddings(audio)?;
         if frames.is_empty() {
             return Err(anyhow!("No frames extracted from audio"));
         }
@@ -643,76 +558,6 @@ impl WakeWordDetector {
         }
     }
 
-    // --- ONNX inference ---
-
-    fn compute_mel(&mut self, audio: &[f32]) -> Result<Vec<f32>> {
-        let input = Tensor::from_array(([1usize, audio.len()], audio.to_vec()))?;
-
-        let outputs = self.mel_session.run(ort::inputs! {
-            "input" => input,
-        })?;
-
-        let (_, raw) = outputs[0].try_extract_tensor::<f32>()?;
-
-        // Post-process: x / 10.0 + 2.0 (from openWakeWord reference)
-        let mel: Vec<f32> = raw.iter().map(|&x| x / 10.0 + 2.0).collect();
-
-        Ok(mel)
-    }
-
-    fn compute_embedding(&mut self, mel_window: &[f32]) -> Result<[f32; EMBEDDING_DIM]> {
-        anyhow::ensure!(mel_window.len() == EMBEDDING_WINDOW * MEL_BINS, "Mel window size mismatch: expected {}, got {}", EMBEDDING_WINDOW * MEL_BINS, mel_window.len());
-
-        let input = Tensor::from_array(
-            ([1usize, EMBEDDING_WINDOW, MEL_BINS, 1], mel_window.to_vec()),
-        )?;
-
-        let outputs = self.emb_session.run(ort::inputs! {
-            "input_1" => input,
-        })?;
-
-        let (_, raw) = outputs["conv2d_19"].try_extract_tensor::<f32>()?;
-
-        let mut emb = [0.0f32; EMBEDDING_DIM];
-        emb.copy_from_slice(&raw[..EMBEDDING_DIM]);
-
-        Ok(emb)
-    }
-}
-
-// --- DTW utilities ---
-
-/// Compute normalized DTW distance between two frame sequences using cosine distance.
-/// Normalization: total_distance / (len_a + len_b) — standard across all production KWS systems
-/// (Raven, Rustpotter, local-wake, Snips). More stable than path-length normalization
-/// because it depends only on input lengths, not alignment quality.
-fn dtw_normalized_distance(a: &[[f32; EMBEDDING_DIM]], b: &[[f32; EMBEDDING_DIM]]) -> f32 {
-    let max_len = a.len().max(b.len());
-    let norm = (a.len() + b.len()).max(1) as f32;
-
-    // Sakoe-Chiba requires band < max(len_x, len_y). Fall back to unconstrained DTW for short sequences.
-    if max_len <= DTW_BAND_WIDTH {
-        let result =
-            dtw_rs::dtw_with_distance(a, b, |x, y| cosine_distance_frames(x, y));
-        return result.distance() / norm;
-    }
-
-    let result = dtw_rs::sakoe_chiba_with_distance(a, b, DTW_BAND_WIDTH, |x, y| {
-        cosine_distance_frames(x, y)
-    });
-    result.distance() / norm
-}
-
-/// Cosine distance between two 96-dim frame embeddings: 1.0 - cosine_similarity.
-fn cosine_distance_frames(a: &[f32; EMBEDDING_DIM], b: &[f32; EMBEDDING_DIM]) -> f32 {
-    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-    let norm_a = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let norm_b = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let denom = norm_a * norm_b;
-    if denom < 1e-8 {
-        return 1.0;
-    }
-    1.0 - dot / denom
 }
 
 /// Cosine similarity between two ndarray vectors (for centroid fallback).

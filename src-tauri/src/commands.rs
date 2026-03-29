@@ -5,9 +5,11 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
+use tauri::Emitter;
+
 use crate::audio::capture::{AudioCapture, AudioResampler};
 use crate::audio::pipeline;
-use crate::audio::{AudioMode, ModelInfo, ModelStatus, PipelineHandle};
+use crate::audio::{AudioMode, ModelInfo, ModelStatus, PipelineHandle, SttEngineResolvedPayload};
 use crate::input::injector;
 use crate::input::TextInputMethod;
 use crate::system::detect::{self, SystemInfo};
@@ -18,6 +20,7 @@ const EMB_MODEL_FILENAME: &str = "embedding_model.onnx";
 const WHISPER_DICTATION_MODEL_FILENAME: &str = "ggml-base.bin";
 const PARAKEET_MODEL_DIR_NAME: &str = "parakeet-tdt";
 const WAKEWORDS_DIR_NAME: &str = "wakewords";
+const SUBCOMMANDS_DIR_NAME: &str = "subcommands";
 
 /// Platform-specific base data directory (ASCII-safe on Windows).
 fn get_creo_data_dir() -> PathBuf {
@@ -82,16 +85,44 @@ pub fn check_models() -> ModelStatus {
     }
 }
 
-/// Shared pipeline startup logic: resolve model paths, validate, start pipeline in given mode.
-/// Detect which dictation STT engine to use based on available models.
-/// Priority: Parakeet (if model dir exists) > Whisper (fallback).
-/// TODO: make this user-selectable via settings instead of auto-detect.
-fn detect_stt_engine() -> &'static str {
-    let parakeet_dir = get_models_dir().join(PARAKEET_MODEL_DIR_NAME);
-    if parakeet_dir.exists() && parakeet_dir.is_dir() {
-        "parakeet"
-    } else {
-        "whisper"
+/// Resolve STT engine from user preference.
+/// - "auto": Parakeet if model dir exists, else Whisper (original behavior)
+/// - "parakeet": require Parakeet model dir
+/// - "whisper": require Whisper model file
+fn resolve_stt_engine(preference: &str) -> Result<&'static str, String> {
+    let dir = get_models_dir();
+    match preference {
+        "parakeet" => {
+            let parakeet_dir = dir.join(PARAKEET_MODEL_DIR_NAME);
+            if parakeet_dir.exists() && parakeet_dir.is_dir() {
+                Ok("parakeet")
+            } else {
+                Err(format!(
+                    "Parakeet model not found. Place parakeet-tdt/ directory in: {}",
+                    dir.to_string_lossy()
+                ))
+            }
+        }
+        "whisper" => {
+            let whisper_path = dir.join(WHISPER_DICTATION_MODEL_FILENAME);
+            if whisper_path.exists() {
+                Ok("whisper")
+            } else {
+                Err(format!(
+                    "Whisper model not found: {}",
+                    whisper_path.to_string_lossy()
+                ))
+            }
+        }
+        _ => {
+            // "auto" or any unknown value: Parakeet if available, else Whisper
+            let parakeet_dir = dir.join(PARAKEET_MODEL_DIR_NAME);
+            if parakeet_dir.exists() && parakeet_dir.is_dir() {
+                Ok("parakeet")
+            } else {
+                Ok("whisper")
+            }
+        }
     }
 }
 
@@ -99,6 +130,7 @@ fn start_pipeline_with_mode(
     app: AppHandle,
     state: &Arc<PipelineHandle>,
     initial_mode: AudioMode,
+    stt_engine: &str,
 ) -> Result<(), String> {
     let dir = get_models_dir();
     let vad_path = dir.join(VAD_MODEL_FILENAME);
@@ -106,6 +138,7 @@ fn start_pipeline_with_mode(
     let emb_path = dir.join(EMB_MODEL_FILENAME);
 
     let wakewords_dir = get_creo_data_dir().join(WAKEWORDS_DIR_NAME);
+    let subcommands_dir = get_creo_data_dir().join(SUBCOMMANDS_DIR_NAME);
 
     if !vad_path.exists() || !mel_path.exists() || !emb_path.exists() {
         return Err(format!(
@@ -114,8 +147,15 @@ fn start_pipeline_with_mode(
         ));
     }
 
-    let engine_type = detect_stt_engine();
-    log::info!("STT engine: {}", engine_type);
+    let engine_type = resolve_stt_engine(stt_engine)?;
+    log::info!("STT engine: {} (preference: {})", engine_type, stt_engine);
+
+    let _ = app.emit(
+        "stt-engine-resolved",
+        SttEngineResolvedPayload {
+            engine: engine_type.to_string(),
+        },
+    );
 
     // Build a factory closure that creates the engine on the transcription thread.
     // This avoids Send issues — the engine is created where it will be used.
@@ -159,6 +199,7 @@ fn start_pipeline_with_mode(
         mel_path.to_string_lossy().to_string(),
         emb_path.to_string_lossy().to_string(),
         wakewords_dir.to_string_lossy().to_string(),
+        subcommands_dir.to_string_lossy().to_string(),
         dictation_engine_factory,
     )
     .map_err(|e| e.to_string())
@@ -168,22 +209,26 @@ fn start_pipeline_with_mode(
 pub fn start_listening(
     app: AppHandle,
     state: State<'_, Arc<PipelineHandle>>,
+    stt_engine: Option<String>,
 ) -> Result<(), String> {
     if state.current_mode() != AudioMode::Off {
         return Ok(()); // Already running — idempotent no-op
     }
-    start_pipeline_with_mode(app, state.inner(), AudioMode::Standby)
+    let engine = stt_engine.as_deref().unwrap_or("auto");
+    start_pipeline_with_mode(app, state.inner(), AudioMode::Standby, engine)
 }
 
 #[tauri::command]
 pub fn start_dictation(
     app: AppHandle,
     state: State<'_, Arc<PipelineHandle>>,
+    stt_engine: Option<String>,
 ) -> Result<(), String> {
     if state.current_mode() != AudioMode::Off {
         return Err("Pipeline already running".to_string());
     }
-    start_pipeline_with_mode(app, state.inner(), AudioMode::Dictation)
+    let engine = stt_engine.as_deref().unwrap_or("auto");
+    start_pipeline_with_mode(app, state.inner(), AudioMode::Dictation, engine)
 }
 
 /// Transition running pipeline to Dictation mode (no restart).
@@ -564,4 +609,262 @@ pub struct WakeCommandInfo {
     pub name: String,
     #[serde(rename = "sampleCount")]
     pub sample_count: usize,
+}
+
+// --- Subcommand management ---
+
+fn get_subcommands_dir() -> PathBuf {
+    get_creo_data_dir().join(SUBCOMMANDS_DIR_NAME)
+}
+
+/// Get the subcommand manifest (list of all defined subcommands).
+#[tauri::command]
+pub fn get_subcommands() -> crate::audio::subcommand::SubcommandManifest {
+    use crate::audio::subcommand::SubcommandManifest;
+
+    let dir = get_subcommands_dir();
+    let path = dir.join("manifest.json");
+    if !path.exists() {
+        return SubcommandManifest::default();
+    }
+    match std::fs::read_to_string(&path) {
+        Ok(data) => serde_json::from_str(&data).unwrap_or_default(),
+        Err(_) => SubcommandManifest::default(),
+    }
+}
+
+/// Create a new subcommand definition in the manifest.
+#[tauri::command]
+pub fn create_subcommand(
+    name: String,
+    action: String,
+    tier: String,
+    state: State<'_, Arc<PipelineHandle>>,
+) -> Result<(), String> {
+    use crate::audio::subcommand::{SubcommandDef, SubcommandManifest, SubcommandTierKind};
+
+    validate_command_name(&name)?;
+
+    let tier_kind: SubcommandTierKind = serde_json::from_str(&format!("\"{}\"", tier))
+        .map_err(|_| format!("Unknown tier: '{}'. Valid: dtw, vosk, llm", tier))?;
+
+    let dir = get_subcommands_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+
+    let manifest_path = dir.join("manifest.json");
+    let mut manifest: SubcommandManifest = if manifest_path.exists() {
+        let data = std::fs::read_to_string(&manifest_path).map_err(|e| e.to_string())?;
+        serde_json::from_str(&data).unwrap_or_default()
+    } else {
+        SubcommandManifest::default()
+    };
+
+    // Check for duplicate
+    if manifest.commands.iter().any(|c| c.name == name) {
+        return Err(format!("Subcommand '{}' already exists", name));
+    }
+
+    manifest.commands.push(SubcommandDef {
+        name: name.clone(),
+        action,
+        tier: tier_kind,
+        phrases: Vec::new(),
+        template: None,
+    });
+
+    let json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
+    std::fs::write(&manifest_path, json).map_err(|e| e.to_string())?;
+
+    // Create sample directory for DTW commands
+    if tier_kind == SubcommandTierKind::Dtw {
+        std::fs::create_dir_all(dir.join(&name)).map_err(|e| e.to_string())?;
+    }
+
+    state.request_reload_references();
+    log::info!("Created subcommand: '{}'", name);
+    Ok(())
+}
+
+/// Delete a subcommand definition and its samples.
+#[tauri::command]
+pub fn delete_subcommand(
+    name: String,
+    state: State<'_, Arc<PipelineHandle>>,
+) -> Result<(), String> {
+    use crate::audio::subcommand::SubcommandManifest;
+
+    validate_command_name(&name)?;
+
+    let dir = get_subcommands_dir();
+
+    // Remove from manifest
+    let manifest_path = dir.join("manifest.json");
+    if manifest_path.exists() {
+        let data = std::fs::read_to_string(&manifest_path).map_err(|e| e.to_string())?;
+        let mut manifest: SubcommandManifest =
+            serde_json::from_str(&data).unwrap_or_default();
+        manifest.commands.retain(|c| c.name != name);
+        let json = serde_json::to_string_pretty(&manifest).map_err(|e| e.to_string())?;
+        std::fs::write(&manifest_path, json).map_err(|e| e.to_string())?;
+    }
+
+    // Remove sample directory
+    let cmd_dir = dir.join(&name);
+    if cmd_dir.exists() {
+        std::fs::remove_dir_all(&cmd_dir).map_err(|e| e.to_string())?;
+    }
+
+    state.request_reload_references();
+    log::info!("Deleted subcommand: '{}'", name);
+    Ok(())
+}
+
+/// Record a DTW sample for a subcommand (same VAD-based flow as wake word recording).
+#[tauri::command]
+pub fn record_subcommand_sample(
+    command_name: String,
+    state: State<'_, Arc<PipelineHandle>>,
+) -> Result<RecordResult, String> {
+    use crate::audio::subcommand::save_frames_file;
+    use crate::audio::vad::SileroVad;
+
+    validate_command_name(&command_name)?;
+
+    let dir = get_models_dir();
+    let mel_path = dir.join(MEL_MODEL_FILENAME);
+    let emb_path = dir.join(EMB_MODEL_FILENAME);
+    let vad_path = dir.join(VAD_MODEL_FILENAME);
+    let subcommands_dir = get_subcommands_dir();
+
+    if !mel_path.exists() || !emb_path.exists() || !vad_path.exists() {
+        return Err("Models not found".to_string());
+    }
+
+    // Start capture + VAD (same pattern as record_wake_sample)
+    let (capture, rx, sample_rate) =
+        crate::audio::capture::AudioCapture::start().map_err(|e| e.to_string())?;
+    let mut resampler =
+        crate::audio::capture::AudioResampler::new(sample_rate).map_err(|e| e.to_string())?;
+    let mut vad = SileroVad::new(&vad_path.to_string_lossy()).map_err(|e| e.to_string())?;
+
+    let chunk_size = SileroVad::chunk_size();
+    let mut vad_buffer: Vec<f32> = Vec::new();
+    let mut speech_buffer: Vec<f32> = Vec::new();
+    let mut is_speaking = false;
+    let mut silence_start: Option<std::time::Instant> = None;
+    let mut speech_detected = false;
+    let timeout = std::time::Instant::now();
+
+    while timeout.elapsed() < std::time::Duration::from_secs(5) {
+        if let Ok(chunk) = rx.recv_timeout(std::time::Duration::from_millis(50)) {
+            let resampled = resampler.process(&chunk);
+            vad_buffer.extend_from_slice(&resampled);
+
+            while vad_buffer.len() >= chunk_size {
+                let vad_chunk: Vec<f32> = vad_buffer.drain(..chunk_size).collect();
+                let is_speech = vad.is_speech(&vad_chunk).unwrap_or(false);
+
+                if is_speech {
+                    silence_start = None;
+                    if !is_speaking {
+                        is_speaking = true;
+                        speech_detected = true;
+                    }
+                    speech_buffer.extend_from_slice(&vad_chunk);
+                } else if is_speaking {
+                    speech_buffer.extend_from_slice(&vad_chunk);
+                    if silence_start.is_none() {
+                        silence_start = Some(std::time::Instant::now());
+                    }
+                    if let Some(start) = silence_start {
+                        if start.elapsed() > std::time::Duration::from_millis(300) {
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if speech_detected && !is_speaking {
+                break;
+            }
+            if is_speaking
+                && silence_start
+                    .map(|s| s.elapsed() > std::time::Duration::from_millis(300))
+                    .unwrap_or(false)
+            {
+                break;
+            }
+        }
+    }
+
+    drop(capture);
+
+    if speech_buffer.is_empty() {
+        return Err("No speech detected. Please try again.".to_string());
+    }
+
+    // Extract embeddings and save
+    let mut extractor = crate::audio::embedding::EmbeddingExtractor::new(
+        &mel_path.to_string_lossy(),
+        &emb_path.to_string_lossy(),
+    )
+    .map_err(|e| e.to_string())?;
+
+    let frames = extractor
+        .extract_frame_embeddings(&speech_buffer)
+        .map_err(|e| e.to_string())?;
+    if frames.is_empty() {
+        return Err("Failed to extract embeddings from audio".to_string());
+    }
+
+    let cmd_dir = subcommands_dir.join(&command_name);
+    std::fs::create_dir_all(&cmd_dir).map_err(|e| e.to_string())?;
+
+    // Find next sample index
+    let idx = std::fs::read_dir(&cmd_dir)
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .filter_map(|e| {
+                    let stem = e.path().file_stem()?.to_str()?.to_string();
+                    stem.strip_prefix("sample_")?.parse::<usize>().ok()
+                })
+                .max()
+                .map(|max| max + 1)
+                .unwrap_or(0)
+        })
+        .unwrap_or(0);
+
+    let frames_path = cmd_dir.join(format!("sample_{}.frames", idx));
+    save_frames_file(&frames_path, &frames).map_err(|e| e.to_string())?;
+
+    let sample_count = std::fs::read_dir(&cmd_dir)
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .filter(|e| {
+                    e.path()
+                        .extension()
+                        .and_then(|ext| ext.to_str())
+                        == Some("frames")
+                })
+                .count()
+        })
+        .unwrap_or(0);
+
+    log::info!(
+        "Recorded subcommand sample '{}': {} frames, total {} samples",
+        command_name,
+        frames.len(),
+        sample_count
+    );
+
+    state.request_reload_references();
+
+    Ok(RecordResult {
+        command_name,
+        embedding_count: 1,
+        total_samples: sample_count,
+        path: frames_path.to_string_lossy().to_string(),
+    })
 }

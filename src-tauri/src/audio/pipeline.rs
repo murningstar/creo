@@ -8,11 +8,12 @@ use tauri::{AppHandle, Emitter};
 
 use super::capture::AudioResampler;
 use super::stt::DictationEngine;
+use super::subcommand::SubcommandCascade;
 use super::vad::SileroVad;
 use super::wakeword::WakeWordDetector;
 use super::{
-    AudioMode, ErrorPayload, PipelineHandle, TranscriptionPayload, TranscriptionRequest,
-    TranscriptionResult, VadStatePayload, WakeAction, WakeActionPayload,
+    AudioMode, ErrorPayload, PipelineHandle, SubcommandMatchPayload, TranscriptionPayload,
+    TranscriptionRequest, TranscriptionResult, VadStatePayload, WakeAction, WakeActionPayload,
 };
 
 const SILENCE_TIMEOUT_STANDBY_MS: u64 = 300;
@@ -24,6 +25,9 @@ const TRANSCRIPTION_CHANNEL_CAPACITY: usize = 4;
 /// Prevents mid-word splits at VAD boundaries.
 const OVERLAP_SAMPLES: usize = 8000; // 500ms at 16kHz
 
+/// AwaitingSubcommand timeout: return to Standby after this many seconds without a match.
+const SUBCOMMAND_TIMEOUT_SECS: u64 = 10;
+
 pub fn start_pipeline(
     app_handle: AppHandle,
     handle: Arc<PipelineHandle>,
@@ -32,6 +36,7 @@ pub fn start_pipeline(
     mel_model_path: String,
     emb_model_path: String,
     wakewords_dir: String,
+    subcommands_dir: String,
     dictation_engine_factory: Box<dyn FnOnce() -> Result<Box<dyn DictationEngine>> + Send>,
 ) -> Result<()> {
     handle.transition_mode(&app_handle, initial_mode);
@@ -45,7 +50,7 @@ pub fn start_pipeline(
     let (result_tx, result_rx): (Sender<TranscriptionResult>, Receiver<TranscriptionResult>) =
         bounded(TRANSCRIPTION_CHANNEL_CAPACITY);
 
-    // Transcription thread (wake word via embedding+DTW, dictation via STT engine)
+    // Transcription thread (wake word via embedding+DTW, subcommand cascade, dictation via STT engine)
     let app2 = app_handle.clone();
     let handle2 = handle.clone();
     let transcription_handle = thread::spawn(move || {
@@ -57,6 +62,7 @@ pub fn start_pipeline(
             &mel_model_path,
             &emb_model_path,
             &wakewords_dir,
+            &subcommands_dir,
             dictation_engine_factory,
         ) {
             log::error!("Transcription thread error: {}", e);
@@ -107,6 +113,9 @@ fn processing_thread(
     // Audio overlap: rolling buffer of last 500ms for cross-segment continuity
     let mut pre_buffer: Vec<f32> = Vec::new();
 
+    // AwaitingSubcommand timeout tracking
+    let mut awaiting_since: Option<Instant> = None;
+
     log::info!(
         "Processing thread started (native rate: {}Hz)",
         native_rate
@@ -121,6 +130,29 @@ fn processing_thread(
         // Check for transcription results (non-blocking)
         while let Ok(result) = result_rx.try_recv() {
             handle_transcription_result(&app, &handle, result);
+        }
+
+        // AwaitingSubcommand timeout
+        match handle.current_mode() {
+            AudioMode::AwaitingSubcommand => {
+                if awaiting_since.is_none() {
+                    awaiting_since = Some(Instant::now());
+                }
+                if let Some(since) = awaiting_since {
+                    if since.elapsed() > Duration::from_secs(SUBCOMMAND_TIMEOUT_SECS) {
+                        log::info!(
+                            "AwaitingSubcommand timeout after {}s → Standby",
+                            SUBCOMMAND_TIMEOUT_SECS
+                        );
+                        handle.transition_mode(&app, AudioMode::Standby);
+                        let _ = app.emit("subcommand-timeout", ());
+                        awaiting_since = None;
+                    }
+                }
+            }
+            _ => {
+                awaiting_since = None;
+            }
         }
 
         // Receive audio (with timeout to check shutdown periodically)
@@ -186,11 +218,17 @@ fn processing_thread(
                             let buffer = std::mem::take(&mut speech_buffer);
 
                             match handle.current_mode() {
-                                AudioMode::Standby | AudioMode::AwaitingSubcommand => {
+                                AudioMode::Standby => {
                                     handle.save_pre_processing_mode();
                                     handle.transition_mode(&app, AudioMode::Processing);
                                     let _ =
                                         trans_tx.send(TranscriptionRequest::WakeWordCheck(buffer));
+                                }
+                                AudioMode::AwaitingSubcommand => {
+                                    handle.save_pre_processing_mode();
+                                    handle.transition_mode(&app, AudioMode::Processing);
+                                    let _ =
+                                        trans_tx.send(TranscriptionRequest::SubcommandCheck(buffer));
                                 }
                                 AudioMode::Dictation => {
                                     // Prepend overlap from previous segment
@@ -242,6 +280,25 @@ fn handle_transcription_result(
                 }
             }
         }
+        TranscriptionResult::SubcommandMatch(m) => {
+            log::info!(
+                "Subcommand: '{}' action='{}' tier={}",
+                m.command_name,
+                m.action,
+                m.tier
+            );
+            let _ = app.emit(
+                "subcommand-match",
+                SubcommandMatchPayload {
+                    command: m.command_name,
+                    action: m.action,
+                    confidence: m.confidence,
+                    tier: m.tier,
+                    params: m.params,
+                },
+            );
+            handle.transition_mode(app, AudioMode::Standby);
+        }
         TranscriptionResult::DictationText { text, is_final } => {
             let _ = app.emit("transcription", TranscriptionPayload { text, is_final });
         }
@@ -261,10 +318,16 @@ fn transcription_thread(
     mel_model_path: &str,
     emb_model_path: &str,
     wakewords_dir: &str,
+    subcommands_dir: &str,
     dictation_engine_factory: Box<dyn FnOnce() -> Result<Box<dyn DictationEngine>> + Send>,
 ) -> Result<()> {
     let mut wake_detector = WakeWordDetector::new(mel_model_path, emb_model_path, wakewords_dir)?;
     log::info!("Wake word detector loaded (embedding+DTW)");
+
+    let mut subcommand_cascade =
+        SubcommandCascade::new(subcommands_dir, mel_model_path, emb_model_path)?;
+    log::info!("Subcommand cascade loaded");
+
     let mut dictation_engine = dictation_engine_factory()?;
     log::info!("Dictation engine loaded: {}", dictation_engine.name());
 
@@ -295,6 +358,27 @@ fn transcription_thread(
                         }
                     }
                 }
+            }
+            TranscriptionRequest::SubcommandCheck(audio) => {
+                // Priority 1: wake words still checked (user might say "Крео, вписывай")
+                if wake_detector.has_references() {
+                    if let Some(detection) = wake_detector.detect(&audio) {
+                        let _ =
+                            result_tx.send(TranscriptionResult::WakeAction(detection.action));
+                        continue;
+                    }
+                }
+
+                // Priority 2: subcommand cascade
+                if subcommand_cascade.has_commands() {
+                    if let Some(m) = subcommand_cascade.process(&audio) {
+                        let _ = result_tx.send(TranscriptionResult::SubcommandMatch(m));
+                        continue;
+                    }
+                }
+
+                // No match in either
+                let _ = result_tx.send(TranscriptionResult::NoMatch);
             }
             TranscriptionRequest::DictationChunk(audio) => {
                 // First check if this is a stop/cancel command via embedding+DTW
@@ -336,7 +420,11 @@ fn transcription_thread(
             TranscriptionRequest::ReloadReferences => {
                 match wake_detector.reload_references() {
                     Ok(()) => log::info!("Wake word references reloaded"),
-                    Err(e) => log::error!("Failed to reload references: {}", e),
+                    Err(e) => log::error!("Failed to reload wake references: {}", e),
+                }
+                match subcommand_cascade.reload() {
+                    Ok(()) => log::info!("Subcommand references reloaded"),
+                    Err(e) => log::error!("Failed to reload subcommand references: {}", e),
                 }
             }
             TranscriptionRequest::Shutdown => break,

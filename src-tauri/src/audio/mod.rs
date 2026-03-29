@@ -1,6 +1,8 @@
 pub mod capture;
+pub mod embedding;
 pub mod pipeline;
 pub mod stt;
+pub mod subcommand;
 pub mod transcriber;
 pub mod vad;
 pub mod wakeword;
@@ -99,6 +101,20 @@ pub struct ErrorPayload {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct SttEngineResolvedPayload {
+    pub engine: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SubcommandMatchPayload {
+    pub command: String,
+    pub action: String,
+    pub confidence: f32,
+    pub tier: u8,
+    pub params: std::collections::HashMap<String, String>,
+}
+
 // --- Model info (for check_models command) ---
 
 #[derive(Debug, Clone, Serialize)]
@@ -124,6 +140,7 @@ pub struct ModelStatus {
 
 pub enum TranscriptionRequest {
     WakeWordCheck(Vec<f32>),
+    SubcommandCheck(Vec<f32>),
     DictationChunk(Vec<f32>),
     ReloadReferences,
     Shutdown,
@@ -131,6 +148,7 @@ pub enum TranscriptionRequest {
 
 pub enum TranscriptionResult {
     WakeAction(WakeAction),
+    SubcommandMatch(subcommand::SubcommandMatch),
     DictationText { text: String, is_final: bool },
     NoMatch,
 }
