@@ -171,6 +171,33 @@
             </div>
         </div>
 
+        <!-- Dev Controls (dev mode only) -->
+        <section
+            v-if="isDev"
+            class="shadow-card rounded-lg border border-dashed border-amber-300 bg-amber-50 p-7 dark:border-amber-700 dark:bg-amber-950/30"
+        >
+            <div>
+                <h2 class="text-highlighted text-sm font-semibold">Dev Controls</h2>
+                <p class="text-dimmed mb-4 text-xs">Development-only settings. Not visible in production.</p>
+
+                <div class="space-y-4 px-7">
+                    <u-form-field
+                        label="Overlay: suppress devtools"
+                        description="Remove Nuxt devtools and Vite error overlay from the indicator window."
+                    >
+                        <u-switch v-model="suppressOverlayDevtools" @update:model-value="onSuppressDevtoolsChange" />
+                    </u-form-field>
+
+                    <u-form-field
+                        label="Overlay: click-through"
+                        description="When ON, clicks pass through the overlay indicator to apps below."
+                    >
+                        <u-switch v-model="overlayClickThrough" @update:model-value="onClickThroughChange" />
+                    </u-form-field>
+                </div>
+            </div>
+        </section>
+
         <!-- About -->
         <div class="text-dimmed border-default mt-8 border-t pt-4 text-center text-xs">
             <p>Creo v0.1.0 · {{ platformStore.platformLabel }}</p>
@@ -179,6 +206,8 @@
 </template>
 
 <script setup lang="ts">
+    import { emitTo } from '@tauri-apps/api/event';
+
     import { RenameAssistant } from '~/widgets/rename-assistant';
     import IHold from '~/shared/ui/icons/ui/i-hold.vue';
     import ITap from '~/shared/ui/icons/ui/i-tap.vue';
@@ -194,6 +223,27 @@
     const settingsStore = useSettingsStore();
     const audioStore = useAudioStore();
     const platformStore = usePlatformStore();
+
+    // --- Dev controls ---
+    const isDev = import.meta.dev;
+    const suppressOverlayDevtools = ref(true);
+    const overlayClickThrough = ref(true);
+
+    async function onSuppressDevtoolsChange(value: boolean) {
+        try {
+            await emitTo('overlay', 'overlay-suppress-devtools', value);
+        } catch (e) {
+            console.warn('Failed to emit overlay-suppress-devtools:', e);
+        }
+    }
+
+    async function onClickThroughChange(value: boolean) {
+        try {
+            await emitTo('overlay', 'overlay-set-click-through', value);
+        } catch (e) {
+            console.warn('Failed to emit overlay-set-click-through:', e);
+        }
+    }
 
     const hotkey = computed<KeyCombo | null>({
         get: () => settingsStore.hotkey,

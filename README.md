@@ -161,18 +161,19 @@ Statuses: `done`, `in-progress`, `planned`, `requires design` (UX/UI must be agr
 <details>
 <summary><b>Post-MVP — Rust Backend</b></summary>
 
-| Feature                      | Status   | Dependencies | Details                                                                                                                                                |
-| ---------------------------- | -------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| parakeet-rs (Parakeet TDT)   | planned  | —            | Primary STT. ONNX Runtime (CUDA/DirectML/CPU). ~640MB INT8. Best Russian WER, native punctuation. Rust crate: `parakeet-rs`                            |
-| STT engine trait/abstraction | planned  | parakeet-rs  | Common interface (Parakeet primary, whisper-rs fallback). Current `Transcriber` struct is the abstraction point                                        |
-| ct2rs (CTranslate2)          | deferred | —            | Отложен до реализации всех основных фич. Для оптимизации пограничных конфигураций (Intel CPU-only). Блокеры в `.claude/docs/audio-pipeline.md`         |
-| enigo text injection         | planned  | —            | Hybrid: SendInput <100 chars, clipboard+paste for longer. **Requires design:** input mode setting (auto / always type / always paste)                  |
-| Sound feedback (rodio/cpal)  | planned  | —            | **Requires design:** which sounds, on which events (wake word recognition? start/stop dictation?)                                                      |
-| Kando integration            | planned  | —            | **Requires design:** launch mechanism (shell command? hotkey? IPC?)                                                                                    |
-| Hotkey fallback              | planned  | —            | **Requires design:** which key, configurability, global hotkey via Tauri                                                                               |
-| Model download mechanism     | planned  | —            | **Requires design:** download progress UI, sources, checksum verification, retry, offline fallback (user brings own models)                            |
-| Configurable model paths     | planned  | —            | Canonical paths already used (Windows `C:\creo-data\models\`, Linux `~/.local/share/creo/models/`). This feature is about UI settings for custom paths |
-| Whisper tiny for wake word   | planned  | —            | Currently base (~150MB), target tiny (~75MB). Switch after pipeline stabilization                                                                      |
+| Feature                         | Status   | Dependencies | Details                                                                                                                                                |
+| ------------------------------- | -------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| STT engine selector             | done     | —            | Backend + persistence (auto/parakeet/whisper). Frontend settings type. UI card in settings deferred (blocked by auto-config UX)                        |
+| Subcommand cascade architecture | done     | —            | embedding.rs extracted, SubcommandTier trait, DtwTier (Tier 1), SubcommandCascade, 4 Tauri commands, `entities/subcommands/` entity                    |
+| parakeet-rs (Parakeet TDT)      | planned  | —            | Primary STT. ONNX Runtime (CUDA/DirectML/CPU). ~640MB INT8. Best Russian WER, native punctuation. Rust crate: `parakeet-rs`                            |
+| ct2rs (CTranslate2)             | deferred | —            | Отложен до реализации всех основных фич. Для оптимизации пограничных конфигураций (Intel CPU-only). Блокеры в `.claude/docs/audio-pipeline.md`         |
+| enigo text injection            | planned  | —            | Hybrid: SendInput <100 chars, clipboard+paste for longer. **Requires design:** input mode setting (auto / always type / always paste)                  |
+| Sound feedback (rodio/cpal)     | planned  | —            | **Requires design:** which sounds, on which events (wake word recognition? start/stop dictation?)                                                      |
+| Kando integration               | planned  | —            | **Requires design:** launch mechanism (shell command? hotkey? IPC?)                                                                                    |
+| Hotkey fallback                 | planned  | —            | **Requires design:** which key, configurability, global hotkey via Tauri                                                                               |
+| Model download mechanism        | planned  | —            | **Requires design:** download progress UI, sources, checksum verification, retry, offline fallback (user brings own models)                            |
+| Configurable model paths        | planned  | —            | Canonical paths already used (Windows `C:\creo-data\models\`, Linux `~/.local/share/creo/models/`). This feature is about UI settings for custom paths |
+| Whisper tiny for wake word      | planned  | —            | Currently base (~150MB), target tiny (~75MB). Switch after pipeline stabilization                                                                      |
 
 </details>
 
@@ -190,13 +191,15 @@ Statuses: `done`, `in-progress`, `planned`, `requires design` (UX/UI must be agr
 <details>
 <summary><b>Post-MVP — UX / Frontend</b></summary>
 
-| Feature                             | Status          | Details                                                                                                       |
-| ----------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------- |
-| Overlay indicator (separate window) | requires design | Transparent, always-on-top, click-through. Pulse wave visible in peripheral vision, doesn't block interaction |
-| Circular waveform (dictation)       | requires design | Compact circular indicator, not a wide rectangle                                                              |
-| Subtle idle indicator               | requires design | Barely noticeable, like OpenWhispr                                                                            |
-| Settings page                       | requires design | Scope: STT engine, text input mode, history retention, hotkey, model management                               |
-| History UI                          | requires design | Command/dictation log with configurable retention (days). Accessible from settings and on first launch        |
+| Feature                             | Status          | Details                                                                                                                                                           |
+| ----------------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Overlay indicator (separate window) | done            | Transparent always-on-top click-through window. State-driven circle (standby/dictation/processing/awaiting), waveform bars, processing ring, transient animations |
+| System tray                         | done            | Tray icon, Show Dashboard / Quit menu, hide-to-tray on close                                                                                                      |
+| Dev controls in Settings            | done            | Devtools suppression + click-through toggle for overlay window                                                                                                    |
+| Circular waveform (dictation)       | requires design | Compact circular indicator, not a wide rectangle                                                                                                                  |
+| Subtle idle indicator               | requires design | Barely noticeable, like OpenWhispr                                                                                                                                |
+| Settings page                       | requires design | Scope: STT engine, text input mode, history retention, hotkey, model management                                                                                   |
+| History UI                          | requires design | Command/dictation log with configurable retention (days). Accessible from settings and on first launch                                                            |
 
 </details>
 
@@ -219,5 +222,16 @@ Statuses: `done`, `in-progress`, `planned`, `requires design` (UX/UI must be agr
 | -------------------------- | --------------------------------------------------------------- |
 | macOS support              | Accessibility + Microphone permissions, Notarization, Metal GPU |
 | Apple Silicon optimization | Metal backend for ONNX Runtime and whisper.cpp                  |
+
+</details>
+
+<details>
+<summary><b>Known Issues / In Progress</b></summary>
+
+| Issue                        | Details                                                                                 |
+| ---------------------------- | --------------------------------------------------------------------------------------- |
+| Overlay positioning offset   | Windows invisible borders (WS_THICKFRAME) cause ~24px offset. Win32 API fix planned     |
+| Proximity fade               | Not yet implemented. Requires Rust cursor polling to fade overlay when mouse approaches |
+| Batch dictation accumulation | Not yet implemented. Dictation segments should accumulate before injection              |
 
 </details>

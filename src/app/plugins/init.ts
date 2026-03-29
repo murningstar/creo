@@ -1,13 +1,25 @@
+import { getCurrentWindow } from '@tauri-apps/api/window';
+
 import { usePlatformStore } from '~/entities/platform';
 import { useSettingsStore } from '~/entities/settings';
 import { useAudioStore } from '~/entities/audio';
 import { useDictationFlow } from '~/features/dictation-flow';
 import { formatForTauri } from '~/features/hotkey-recorder';
 
+/** Check if we're running in the main dashboard window (not overlay). */
+function isMainWindow(): boolean {
+    try {
+        return getCurrentWindow().label === 'main';
+    } catch {
+        return true; // Fallback: assume main if Tauri API unavailable
+    }
+}
+
 export default defineNuxtPlugin(async () => {
     const platformStore = usePlatformStore();
 
-    if (platformStore.isNativePlatform) {
+    // Skip full initialization in overlay window — it only listens to events
+    if (platformStore.isNativePlatform && isMainWindow()) {
         const settingsStore = useSettingsStore();
         const audioStore = useAudioStore();
 

@@ -216,7 +216,10 @@
         </u-modal>
 
         <!-- Dev controls -->
-        <div v-if="isDev" class="border-accented rounded-lg border border-dashed p-3">
+        <div
+            v-if="isDev"
+            class="rounded-lg border border-dashed border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-950/30"
+        >
             <p class="text-dimmed mb-2 text-xs font-medium tracking-wide uppercase">Dev Controls</p>
             <div class="flex flex-wrap gap-2">
                 <u-button

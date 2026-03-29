@@ -26,9 +26,12 @@
 1. **Wake word detection** — активация голосом через Silero VAD v6 + Google speech-embedding (96-dim ONNX) + DTW frame-level matching
 2. **Dictation** — диктовка текста с вводом через enigo (SendInput / clipboard+paste)
 3. **Voice commands** — голосовые подкоманды после "приём" (AwaitingSubcommand mode)
-4. **Auto-configuration** — автоопределение железа, подбор оптимальной модели
-5. **History** — история команд/диктовок с настраиваемым retention
-6. **Hotkey fallback** — горячая клавиша как альтернатива wake word
+4. **Subcommand cascade** — tiered recognition после "приём" (Tier 1: DTW implemented, Tier 2: Vosk planned, Tier 3: Qwen3+GBNF planned)
+5. **Overlay indicator** — transparent always-on-top click-through window showing audio state
+6. **System tray** — tray icon с "Show Dashboard" / "Quit", hide-to-tray при закрытии main window
+7. **Auto-configuration** — автоопределение железа, подбор оптимальной модели
+8. **History** — история команд/диктовок с настраиваемым retention
+9. **Hotkey fallback** — горячая клавиша как альтернатива wake word
 
 ---
 
@@ -54,6 +57,8 @@
 - **parakeet-rs** — основной STT (Parakeet TDT 0.6B, ONNX Runtime: CUDA/DirectML/CPU). Целевой движок для всех платформ
 - **whisper-rs** (whisper.cpp, GGML base model) — fallback STT, текущий placeholder до интеграции parakeet-rs
 - ct2rs (CTranslate2) — отложен до реализации всех основных фич; актуален для оптимизации пограничных конфигураций (Intel CPU-only). Детали и блокеры в [audio-pipeline.md](.claude/docs/audio-pipeline.md#потенциал-для-будущей-оптимизации-ct2rs)
+- **embedding.rs** — shared EmbeddingExtractor (mel+embedding ONNX), DTW utilities, FrameSequence type. Используется в wakeword.rs и subcommand.rs
+- **subcommand.rs** — SubcommandCascade, SubcommandTier trait, DtwTier, manifest types (SubcommandDef, ParametricTemplate, SlotDef)
 - **enigo** — ввод текста в активное приложение (гибрид: SendInput < 100 символов, clipboard+paste для длинного)
 - **rodio/cpal** — звуковой feedback
 
@@ -66,6 +71,11 @@
 > **Architecture audit:** [`.claude/docs/architecture-audit.md`](.claude/docs/architecture-audit.md) — 25 findings от 3 independent auditors (2026-03-27). Статусы обновляются по мере фиксов. **Сверяться:** перед любой cross-cutting доработкой, при архитектурных решениях.
 
 Краткая схема: Микрофон (cpal) → Silero VAD v6 (ort/ONNX) → speech buffer → [wake words: Google embedding + DTW] / [dictation: whisper-rs base] → Tauri events → Vue frontend. Три потока: capture, VAD processing, transcription (DTW + whisper).
+
+**STT engine selection:**
+
+- `resolve_stt_engine(preference)` принимает `"auto"` / `"parakeet"` / `"whisper"` из frontend settings
+- `start_listening` и `start_dictation` принимают optional `stt_engine` parameter
 
 > **ВАЖНО:** При изменении pipeline поведения — обновлять CLAUDE.md, audio-pipeline.md и evolution-plan.md **в том же коммите**. Stale docs = stale decisions.
 
@@ -173,6 +183,7 @@ app → pages → widgets → features → entities → shared
 - **Plugins:** `app/plugins`
 - **Auto-import компонентов из shared:** паттерн `{shared}/**/ui/*/*.vue`, префикс `c`
 - **DevServer:** http://0.0.0.0:4730 (без HTTPS)
+- **Overlay window:** второе Tauri-окно (`label: "overlay"`), transparent, always-on-top, click-through, no decorations. Capabilities в `capabilities/overlay.json`. `tauri-plugin-window-state` denylists "overlay" (prevents corrupted state restore)
 
 ---
 
@@ -201,6 +212,10 @@ app → pages → widgets → features → entities → shared
 **Tauri events (Rust → Frontend):**
 
 - Именование: `audio-state-changed`, `vad-state`, `transcription`, `wake-command`, `audio-error`
+- `vad-amplitude` — RMS amplitude per VAD frame (для overlay waveform)
+- `stt-engine-resolved` — какой STT engine был фактически выбран
+- `subcommand-match` — subcommand recognized (command, action, confidence, tier, params)
+- `subcommand-timeout` — AwaitingSubcommand timed out (10s)
 - Ошибки аудио-пайплайна — событие `audio-error` (НЕ generic `error`)
 
 **PipelineHandle (managed state):**
@@ -250,6 +265,15 @@ segment/
 - `AudioMode` enum: Off, Standby, Dictation, Processing, AwaitingSubcommand
 - Computed: `isOff`, `isStandby`, `isDictation`, `isProcessing`, `isAwaitingSubcommand`
 
+**settings** (`entities/settings/`):
+
+- Включает `sttEngine: SttEngine` (`'auto'` | `'parakeet'` | `'whisper'`)
+
+**subcommands** (`entities/subcommands/`):
+
+- Pinia store для subcommand CRUD + DTW sample recording
+- Types: `SubcommandDef`, `ParametricTemplate`, `SlotDef`, `SubcommandManifest`
+
 ---
 
 ## Commands
@@ -298,6 +322,7 @@ Stale docs = stale decisions = bugs from misalignment.
 - Layouts в `shared/ui/layouts`
 - Модели хранятся в ASCII-путях (Windows: `C:\creo-data\`, Linux: `~/.local/share/creo/`)
 - Порт dev server: 4730
+- System tray: hide-to-tray при закрытии окна, "Quit" для выхода. Cargo features: `tray-icon`, `image-ico` в tauri dependency
 
 ### Build Dependencies (Rust)
 

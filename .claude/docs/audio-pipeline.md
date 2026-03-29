@@ -13,8 +13,10 @@ Silero VAD v6 (~1.8MB ONNX, always-on, <1% CPU)
 Google speech-embedding (mel ONNX 1MB + emb ONNX 1.3MB)
     → frame-level DTW matching (dtw_rs)
     │
-    ├─ "Крео, приём" → AwaitingSubcommand mode
-    │   → DTW / Vosk grammar / Qwen3 LLM (tiered cascade)
+    ├─ "Крео, приём" → AwaitingSubcommand mode (10s timeout → Standby)
+    │   → Tier 1: DTW frame-level matching (✅ implemented, <50ms)
+    │   → Tier 2: Vosk grammar mode (planned, <100ms)
+    │   → Tier 3: Qwen3 1.7B + GBNF (planned, 0.5-2s)
     │
     ├─ "Крео, вписывай" → Dictation mode
     │   → STT engine (parakeet-rs primary, whisper-rs fallback)

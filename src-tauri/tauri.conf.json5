@@ -24,19 +24,17 @@
             {
                 "label": "overlay",
                 "url": "/overlay",
-                "title": "",
-                "width": 60,
-                "height": 60,
+                "title": "Creo Indicator",
+                "width": 96,
+                "height": 96,
                 "transparent": true,
                 "decorations": false,
                 "alwaysOnTop": true,
-                "skipTaskbar": true,
                 "shadow": false,
                 "resizable": false,
                 "closable": false,
                 "visible": false,
-                "focus": false,
-                "focusable": false
+                "focus": false
             }
         ],
         "security": {

@@ -5,7 +5,9 @@ mod system;
 
 use std::sync::Arc;
 
-use tauri::{Emitter, Manager, RunEvent};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{Emitter, Manager, RunEvent, WindowEvent};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -19,7 +21,11 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_os::init())
         .plugin(tauri_plugin_store::Builder::new().build())
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_denylist(&["overlay"])
+                .build(),
+        )
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_shortcut(default_hotkey)
@@ -90,40 +96,116 @@ pub fn run() {
             // Store polling shutdown flag for exit handler
             app.manage(polling_shutdown);
 
-            // Position overlay window in bottom-right corner
+            // Position overlay window in bottom-right corner (above taskbar)
             if let Some(overlay) = app.get_webview_window("overlay") {
                 if let Ok(monitor) = overlay.current_monitor() {
                     if let Some(monitor) = monitor {
                         let screen = monitor.size();
+                        let mon_pos = monitor.position();
                         let scale = monitor.scale_factor();
-                        let margin = (12.0 * scale) as i32;
-                        let size = (60.0 * scale) as i32;
-                        let x = (screen.width as i32 / scale as i32) - size - margin;
-                        let y = (screen.height as i32 / scale as i32) - size - margin;
-                        let _ = overlay.set_position(tauri::Position::Logical(
-                            tauri::LogicalPosition::new(x as f64, y as f64),
+
+                        // Window is 96x96 with 48px circle centered inside.
+                        // The 24px transparent padding around the circle IS the margin.
+                        // Position window flush to screen edge — no Rust margin needed.
+                        // Invisible borders extend beyond screen edge (they're invisible).
+                        let window_phys = (96.0 * scale) as i32;
+                        let taskbar_phys = (48.0 * scale) as i32;
+
+                        let x = mon_pos.x + screen.width as i32 - window_phys;
+                        let y = mon_pos.y + screen.height as i32
+                            - window_phys
+                            - taskbar_phys;
+
+                        let _ = overlay.set_position(tauri::Position::Physical(
+                            tauri::PhysicalPosition::new(x, y),
                         ));
                     }
                 }
                 // Enable click-through by default
                 let _ = overlay.set_ignore_cursor_events(true);
+
+                // Dev: keep in Alt+Tab for F12 DevTools access
+                // Prod: hide from taskbar/Alt+Tab
+                if !cfg!(debug_assertions) {
+                    let _ = overlay.set_skip_taskbar(true);
+                }
+
+                // Show the overlay window (starts hidden in config)
+                let _ = overlay.show();
             }
+
+            // --- System tray ---
+            let show_item = MenuItem::with_id(app, "show", "Show Dashboard", true, None::<&str>)?;
+            let separator = PredefinedMenuItem::separator(app)?;
+            let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+            let tray_menu = Menu::with_items(app, &[&show_item, &separator, &quit_item])?;
+
+            let _tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .tooltip("Creo")
+                .menu(&tray_menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => {
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.unminimize();
+                            let _ = window.set_focus();
+                        }
+                    }
+                    "quit" => {
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.unminimize();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
 
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
-            if let RunEvent::Exit = event {
-                // Stop model polling thread
-                let polling = app.state::<std::sync::Arc<std::sync::atomic::AtomicBool>>();
-                polling.store(true, std::sync::atomic::Ordering::Relaxed);
+            match event {
+                // Hide main window to tray instead of quitting
+                RunEvent::WindowEvent {
+                    label,
+                    event: WindowEvent::CloseRequested { api, .. },
+                    ..
+                } if label == "main" => {
+                    api.prevent_close();
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.hide();
+                    }
+                }
 
-                // Stop audio pipeline
-                let handle = app.state::<Arc<audio::PipelineHandle>>();
-                handle.request_shutdown();
-                let _ = handle.join_threads();
-                log::info!("Pipeline shutdown complete");
+                RunEvent::Exit => {
+                    // Stop model polling thread
+                    let polling = app.state::<std::sync::Arc<std::sync::atomic::AtomicBool>>();
+                    polling.store(true, std::sync::atomic::Ordering::Relaxed);
+
+                    // Stop audio pipeline
+                    let handle = app.state::<Arc<audio::PipelineHandle>>();
+                    handle.request_shutdown();
+                    let _ = handle.join_threads();
+                    log::info!("Pipeline shutdown complete");
+                }
+
+                _ => {}
             }
         });
 }

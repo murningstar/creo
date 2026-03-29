@@ -185,6 +185,16 @@ fn processing_thread(
 
             let _ = app.emit("vad-state", VadStatePayload { is_speech: speech });
 
+            // Emit RMS amplitude for overlay waveform visualization
+            if speech {
+                let rms = (vad_chunk.iter().map(|&s| (s * s) as f64).sum::<f64>()
+                    / vad_chunk.len() as f64)
+                    .sqrt() as f32;
+                // Normalize: typical speech RMS ~0.02-0.15, scale to 0.0-1.0
+                let normalized = (rms * 8.0).min(1.0);
+                let _ = app.emit("vad-amplitude", normalized);
+            }
+
             if speech {
                 silence_start = None;
                 if !is_speaking {
