@@ -4,7 +4,7 @@
 
 Десктопный голосовой помощник (Windows + Linux, macOS позже) на Nuxt 3 + Tauri 2 с Feature-Sliced Design архитектурой. Полностью self-hosted, все ML модели работают локально.
 
-**Статус:** Аудио-пайплайн: cpal → Silero VAD v6 → Google speech-embedding + DTW wake word detection → whisper-rs base (dictation placeholder до интеграции ct2rs/parakeet-rs). State machine: Off/Standby/Dictation/Processing/AwaitingSubcommand. Mode transitions без restart pipeline.
+**Статус:** Аудио-пайплайн: cpal → Silero VAD v6 → Google speech-embedding + DTW wake word detection → whisper-rs base (dictation fallback, placeholder до интеграции parakeet-rs). State machine: Off/Standby/Dictation/Processing/AwaitingSubcommand. Mode transitions без restart pipeline.
 
 ---
 
@@ -51,10 +51,9 @@
 - **Silero VAD v6** (ONNX Runtime / `ort`) — always-on voice activity detection (~0.4% CPU)
 - **Google speech-embedding** (mel + embedding ONNX) — 96-dim wake word embeddings, language-agnostic
 - **dtw_rs** — DTW frame-level matching для wake word detection
-- **whisper-rs** (whisper.cpp, GGML base model) — dictation placeholder (текущий STT)
-- **Main STT — два движка, user-selectable:**
-    - **CTranslate2 via ct2rs** — для NVIDIA GPU + CPU (скорость faster-whisper, CTranslate2 модели)
-    - **Parakeet TDT 0.6B via parakeet-rs** — для AMD/Intel GPU (DirectML/Vulkan) + CPU (ONNX модель ~640MB INT8, лучший WER)
+- **parakeet-rs** — основной STT (Parakeet TDT 0.6B, ONNX Runtime: CUDA/DirectML/CPU). Целевой движок для всех платформ
+- **whisper-rs** (whisper.cpp, GGML base model) — fallback STT, текущий placeholder до интеграции parakeet-rs
+- ct2rs (CTranslate2) — отложен до реализации всех основных фич; актуален для оптимизации пограничных конфигураций (Intel CPU-only). Детали и блокеры в [audio-pipeline.md](.claude/docs/audio-pipeline.md#потенциал-для-будущей-оптимизации-ct2rs)
 - **enigo** — ввод текста в активное приложение (гибрид: SendInput < 100 символов, clipboard+paste для длинного)
 - **rodio/cpal** — звуковой feedback
 

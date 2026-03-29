@@ -17,7 +17,7 @@ Google speech-embedding (mel ONNX 1MB + emb ONNX 1.3MB)
     │   → DTW / Vosk grammar / Qwen3 LLM (tiered cascade)
     │
     ├─ "Крео, вписывай" → Dictation mode
-    │   → STT engine (ct2rs или parakeet-rs, user-selectable)
+    │   → STT engine (parakeet-rs primary, whisper-rs fallback)
     │   → enigo → ввод текста в активное приложение
     │
     ├─ "Крео, готово" → Stop dictation → inject text → Standby
@@ -39,14 +39,14 @@ Tensor interface (v6):
 
 ## Модели
 
-| Модель                    | Назначение                               | Размер      | Формат      |
-| ------------------------- | ---------------------------------------- | ----------- | ----------- |
-| Silero VAD v6             | Voice Activity Detection (always-on)     | ~1.8 MB     | ONNX        |
-| Mel spectrogram           | Wake word preprocessing                  | ~1 MB       | ONNX        |
-| Speech embedding          | Wake word 96-dim embeddings              | ~1.3 MB     | ONNX        |
-| Whisper base              | Dictation placeholder (текущий)          | ~150 MB     | GGML        |
-| Parakeet TDT 0.6B v3 INT8 | Main STT (ONNX Runtime, user-selectable) | ~640 MB     | ONNX        |
-| Whisper models via ct2rs  | Main STT (CTranslate2, user-selectable)  | 500MB-1.5GB | CTranslate2 |
+| Модель                    | Назначение                                     | Размер      | Формат      |
+| ------------------------- | ---------------------------------------------- | ----------- | ----------- |
+| Silero VAD v6             | Voice Activity Detection (always-on)           | ~1.8 MB     | ONNX        |
+| Mel spectrogram           | Wake word preprocessing                        | ~1 MB       | ONNX        |
+| Speech embedding          | Wake word 96-dim embeddings                    | ~1.3 MB     | ONNX        |
+| Whisper base              | Fallback STT, текущий placeholder              | ~150 MB     | GGML        |
+| Parakeet TDT 0.6B v3 INT8 | Main STT (ONNX Runtime)                        | ~640 MB     | ONNX        |
+| Whisper models via ct2rs  | Отложен (оптимизация пограничных конфигураций) | 500MB-1.5GB | CTranslate2 |
 
 ## Hardware Acceleration Coverage
 

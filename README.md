@@ -74,7 +74,7 @@ curl -L -o "C:\creo-data\models\embedding_model.onnx" "https://github.com/dscrip
 
 ### Whisper Base GGML (~150 MB)
 
-Speech-to-text model for dictation (placeholder until ct2rs/parakeet-rs integration).
+Speech-to-text model for dictation (fallback STT, placeholder until parakeet-rs integration).
 
 **Download:** go to https://huggingface.co/ggerganov/whisper.cpp/tree/main and download `ggml-base.bin`.
 
@@ -161,18 +161,18 @@ Statuses: `done`, `in-progress`, `planned`, `requires design` (UX/UI must be agr
 <details>
 <summary><b>Post-MVP — Rust Backend</b></summary>
 
-| Feature                      | Status  | Dependencies         | Details                                                                                                                                                |
-| ---------------------------- | ------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| ct2rs (CTranslate2)          | planned | —                    | Main STT for NVIDIA GPU + CPU. Replaces whisper-rs for dictation. Rust crate: `ct2rs`                                                                  |
-| parakeet-rs (Parakeet TDT)   | planned | —                    | Main STT for AMD/Intel GPU + CPU. ONNX model ~600MB. Better Russian WER. Rust crate: `parakeet-rs`                                                     |
-| STT engine trait/abstraction | planned | ct2rs or parakeet-rs | Common interface for swapping engines. Current `Transcriber` struct is the abstraction point                                                           |
-| enigo text injection         | planned | —                    | Hybrid: SendInput <100 chars, clipboard+paste for longer. **Requires design:** input mode setting (auto / always type / always paste)                  |
-| Sound feedback (rodio/cpal)  | planned | —                    | **Requires design:** which sounds, on which events (wake word recognition? start/stop dictation?)                                                      |
-| Kando integration            | planned | —                    | **Requires design:** launch mechanism (shell command? hotkey? IPC?)                                                                                    |
-| Hotkey fallback              | planned | —                    | **Requires design:** which key, configurability, global hotkey via Tauri                                                                               |
-| Model download mechanism     | planned | —                    | **Requires design:** download progress UI, sources, checksum verification, retry, offline fallback (user brings own models)                            |
-| Configurable model paths     | planned | —                    | Canonical paths already used (Windows `C:\creo-data\models\`, Linux `~/.local/share/creo/models/`). This feature is about UI settings for custom paths |
-| Whisper tiny for wake word   | planned | —                    | Currently base (~150MB), target tiny (~75MB). Switch after pipeline stabilization                                                                      |
+| Feature                      | Status   | Dependencies | Details                                                                                                                                                |
+| ---------------------------- | -------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| parakeet-rs (Parakeet TDT)   | planned  | —            | Primary STT. ONNX Runtime (CUDA/DirectML/CPU). ~640MB INT8. Best Russian WER, native punctuation. Rust crate: `parakeet-rs`                            |
+| STT engine trait/abstraction | planned  | parakeet-rs  | Common interface (Parakeet primary, whisper-rs fallback). Current `Transcriber` struct is the abstraction point                                        |
+| ct2rs (CTranslate2)          | deferred | —            | Отложен до реализации всех основных фич. Для оптимизации пограничных конфигураций (Intel CPU-only). Блокеры в `.claude/docs/audio-pipeline.md`         |
+| enigo text injection         | planned  | —            | Hybrid: SendInput <100 chars, clipboard+paste for longer. **Requires design:** input mode setting (auto / always type / always paste)                  |
+| Sound feedback (rodio/cpal)  | planned  | —            | **Requires design:** which sounds, on which events (wake word recognition? start/stop dictation?)                                                      |
+| Kando integration            | planned  | —            | **Requires design:** launch mechanism (shell command? hotkey? IPC?)                                                                                    |
+| Hotkey fallback              | planned  | —            | **Requires design:** which key, configurability, global hotkey via Tauri                                                                               |
+| Model download mechanism     | planned  | —            | **Requires design:** download progress UI, sources, checksum verification, retry, offline fallback (user brings own models)                            |
+| Configurable model paths     | planned  | —            | Canonical paths already used (Windows `C:\creo-data\models\`, Linux `~/.local/share/creo/models/`). This feature is about UI settings for custom paths |
+| Whisper tiny for wake word   | planned  | —            | Currently base (~150MB), target tiny (~75MB). Switch after pipeline stabilization                                                                      |
 
 </details>
 

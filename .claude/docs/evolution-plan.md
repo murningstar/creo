@@ -27,7 +27,7 @@ Standby mode:
 
 Dictation mode:
   Mic → Silero VAD (800ms silence threshold) → 500ms audio overlap
-    → Parakeet TDT 0.6B v3 (target) / Whisper tiny+context (current)
+    → Parakeet TDT 0.6B v3 (primary) / Whisper base (fallback, current)
     → text with punctuation → inject into active app
   Stop/Cancel detection:
     → Embedding DTW match on each segment + text verification gate on match
@@ -57,16 +57,17 @@ AwaitingSubcommand mode:
 
 ## Финальный выбор моделей
 
-| Роль                                 | Модель                                 | Size           | CPU perf                                  | Почему именно эта                                                                                                                                         |
-| ------------------------------------ | -------------------------------------- | -------------- | ----------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| VAD (always-on)                      | **Silero VAD v6**                      | 1.8MB          | <1% idle                                  | Best-in-class, уже интегрирована, ONNX                                                                                                                    |
-| Wake word embedding                  | **Google speech-embedding CNN 96-dim** | 2.3MB          | <1% idle                                  | Обучена на keyword discrimination (правильный objective). ECAPA-TDNN — ОТВЕРГНУТА (speaker verification, подавляет phonetic info)                         |
-| Wake word classifier (target)        | **livekit-wakeword conv-attention**    | ~100KB/command | <1% idle                                  | 100x fewer FP (0.08 FPPH), 86.1% recall. Pre-trained offline + on-device fine-tune (10-30s). ⛔ TTS pipeline на устройстве инвалидирован                  |
-| Dictation STT (target)               | **Parakeet TDT 0.6B v3 INT8**          | ~671MB         | **RTF 0.033** (30x real-time on i7-12700) | 5.51% WER Russian, native punctuation/capitalization, auto language detection (25 EU langs). Быстрее Whisper small на CPU при dramatically лучшем quality |
-| Subcommand recognition               | **Vosk + grammar**                     | ~50MB/lang     | burst only                                | 0 записей от пользователя, `[unk]` rejection, streaming, Apache 2.0, Rust bindings (vosk-rs)                                                              |
-| Command NLU (primary)                | **Qwen3 1.7B Q4_K_M**                  | ~1GB           | 1-2s burst                                | **0.960** tool-calling benchmark, 119 languages, GBNF JSON output. Performs on par with Qwen2.5-3B                                                        |
-| Command NLU (weak HW fallback)       | **Qwen3 0.6B Q4_K_M**                  | ~400MB         | 0.5-0.75s                                 | **0.880** tool-calling (бьёт FunctionGemma 270M: 0.640, Phi-4-mini 3.8B: 0.780, Gemma 3 1B: 0.550)                                                        |
-| Dictation STT (alt, user-selectable) | **Whisper models via ct2rs**           | 500MB-1.5GB    | Varies by model                           | CTranslate2 runtime, NVIDIA GPU + CPU. 99 languages. User-selectable alongside Parakeet. Auto-config подбирает оптимальный.                               |
+| Роль                           | Модель                                 | Size           | CPU perf                                  | Почему именно эта                                                                                                                                                                                    |
+| ------------------------------ | -------------------------------------- | -------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| VAD (always-on)                | **Silero VAD v6**                      | 1.8MB          | <1% idle                                  | Best-in-class, уже интегрирована, ONNX                                                                                                                                                               |
+| Wake word embedding            | **Google speech-embedding CNN 96-dim** | 2.3MB          | <1% idle                                  | Обучена на keyword discrimination (правильный objective). ECAPA-TDNN — ОТВЕРГНУТА (speaker verification, подавляет phonetic info)                                                                    |
+| Wake word classifier (target)  | **livekit-wakeword conv-attention**    | ~100KB/command | <1% idle                                  | 100x fewer FP (0.08 FPPH), 86.1% recall. Pre-trained offline + on-device fine-tune (10-30s). ⛔ TTS pipeline на устройстве инвалидирован                                                             |
+| Dictation STT (primary)        | **Parakeet TDT 0.6B v3 INT8**          | ~671MB         | **RTF 0.033** (30x real-time on i7-12700) | 5.51% WER Russian, native punctuation/capitalization, auto language detection (25 EU langs). Быстрее Whisper small на CPU при dramatically лучшем quality. ONNX Runtime: CUDA/DirectML/CPU — все GPU |
+| Dictation STT (fallback)       | **Whisper base via whisper-rs**        | ~150MB         | Slower than Parakeet                      | whisper.cpp, GGML. Текущий placeholder, остаётся как fallback                                                                                                                                        |
+| Dictation STT (отложен)        | **Whisper models via ct2rs**           | 500MB-1.5GB    | Varies by model                           | CTranslate2 runtime. Отложен до реализации всех основных фич; для оптимизации пограничных конфигураций (Intel CPU-only). Блокеры в audio-pipeline.md                                                 |
+| Subcommand recognition         | **Vosk + grammar**                     | ~50MB/lang     | burst only                                | 0 записей от пользователя, `[unk]` rejection, streaming, Apache 2.0, Rust bindings (vosk-rs)                                                                                                         |
+| Command NLU (primary)          | **Qwen3 1.7B Q4_K_M**                  | ~1GB           | 1-2s burst                                | **0.960** tool-calling benchmark, 119 languages, GBNF JSON output. Performs on par with Qwen2.5-3B                                                                                                   |
+| Command NLU (weak HW fallback) | **Qwen3 0.6B Q4_K_M**                  | ~400MB         | 0.5-0.75s                                 | **0.880** tool-calling (бьёт FunctionGemma 270M: 0.640, Phi-4-mini 3.8B: 0.780, Gemma 3 1B: 0.550)                                                                                                   |
 
 ---
 
@@ -205,7 +206,7 @@ Requires training data per intent schema, doesn't generalize to new intents with
 
 ### Dictation STT
 
-**Parakeet TDT 0.6B v3 INT8 (целевой)**
+**Parakeet TDT 0.6B v3 INT8 (primary STT)**
 FastConformer encoder + Token-and-Duration Transducer. Non-autoregressive — predicts token AND skip in one step → fundamentally faster than Whisper.
 
 Key metrics:
@@ -222,19 +223,17 @@ Key metrics:
 
 Rust: `parakeet-rs` v0.3.4 (MIT/Apache-2.0), DirectML, CUDA, CPU fallback.
 
-**Два STT движка — user-selectable (согласно CLAUDE.md):**
+**Приоритет STT движков:**
 
-- **Parakeet TDT 0.6B v3** (parakeet-rs) — ONNX Runtime, DirectML/CUDA/CPU. 25 EU languages, native punctuation. Best for AMD/Intel GPU.
-- **Whisper models via ct2rs** (CTranslate2) — NVIDIA GPU + CPU. 99 languages, faster-whisper speed. Best for NVIDIA GPU.
-- **Auto-configuration** определяет hardware → рекомендует оптимальный движок. Пользователь может override в настройках.
-- **Whisper base на whisper-rs** — текущий placeholder, замещается обоими движками.
-- Wake word detection использует отдельные ONNX модели (mel + embedding), НЕ Whisper.
+- **Parakeet TDT 0.6B v3** (parakeet-rs) — **primary STT.** ONNX Runtime: CUDA/DirectML/CPU — все GPU-вендоры. 25 EU languages, native punctuation.
+- **Whisper base** (whisper-rs) — **fallback STT.** Текущий placeholder, остаётся как fallback после интеграции Parakeet.
+- **Whisper via ct2rs** (CTranslate2) — **отложен.** Актуален для оптимизации пограничных конфигураций (Intel CPU-only, 99 languages). Возвращаемся только после реализации всех основных фич. Блокеры и обоснование в audio-pipeline.md.
+- Wake word detection использует отдельные ONNX модели (mel + embedding), НЕ STT движок.
 
-**Архитектурное различие Whisper vs Parakeet (для UX-координации):**
+**Архитектурное различие Whisper vs Parakeet:**
 
 - **Whisper:** batch model. Context carry-over через explicit prompt_tokens — нужно вручную передавать. Risk: hallucination loops.
 - **Parakeet:** transducer, designed for chunked inference с overlapping attention windows. Context carry-over встроен в архитектуру. Нативная пунктуация.
-- **Для UI:** при выборе STT в настройках — banner: "Parakeet: Best quality, punctuation, 25 EU languages. Whisper: 99 languages, slower."
 
 ### Dictation Segmentation
 
