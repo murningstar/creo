@@ -66,6 +66,12 @@ Completely bypasses Wayland — works on ALL compositors.
 - Flatpak/Snap: NOT accessible without escape hatch
 - SELinux/AppArmor may restrict /dev/input access
 
+### Combo hotkey reliability
+
+Комбо-хоткеи (Modifier+Key) ненадёжны при перехвате через evdev: первая клавиша утекает в систему до детекции комбо. Одиночная не-символьная клавиша (F9, ScrollLock) значительно надёжнее и удобнее.
+
+**В коде:** `hotkey-constraints.ts` выдаёт `linuxComboUnreliable` warning для любого modifier combo на Linux. Предлагает single-key альтернативы (ScrollLock, Pause, F13+).
+
 ### Security implications
 
 - Reading /dev/input = seeing ALL keyboard input (passwords, etc.)

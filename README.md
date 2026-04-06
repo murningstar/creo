@@ -18,6 +18,22 @@ Nuxt 3 + Tauri 2 + Rust audio pipeline.
     - Windows: `winget install Kitware.CMake`
     - Linux: `sudo apt install cmake`
 
+### Fedora 43 / GCC 15
+
+whisper.cpp crashes with `std::bad_alloc` during build on GCC 15 ([Bug 86164](https://gcc.gnu.org/bugzilla/show_bug.cgi?id=86164)). Fixed in GCC 16 (Fedora 44). Workaround — build with Clang:
+
+```bash
+CC=clang CXX=clang++ pnpm tauri:dev
+```
+
+Or create `src-tauri/.cargo/config.toml`:
+
+```toml
+[env]
+CC = "clang"
+CXX = "clang++"
+```
+
 ### Environment variables (Windows)
 
 ```bash

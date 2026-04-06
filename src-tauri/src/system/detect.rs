@@ -46,7 +46,7 @@ pub enum GpuVendor {
     Unknown,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum DisplayServer {
     X11,
@@ -205,7 +205,7 @@ fn detect_gpu() -> Option<GpuInfo> {
     best
 }
 
-fn detect_display_server() -> DisplayServer {
+pub fn detect_display_server() -> DisplayServer {
     if cfg!(target_os = "windows") {
         DisplayServer::Windows
     } else if cfg!(target_os = "macos") {

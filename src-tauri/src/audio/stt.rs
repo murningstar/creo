@@ -36,6 +36,28 @@ const WHISPER_MAX_CONTEXT_CHARS: usize = 200;
 const WHISPER_NO_SPEECH_PROB_THRESHOLD: f32 = 0.6;
 const WHISPER_MIN_SEGMENT_TEXT_LEN: usize = 3;
 
+/// Validate that the Whisper model supports the requested language.
+/// distil-* models are English-only — using them with non-English languages
+/// silently produces English output instead of the requested language.
+fn validate_whisper_model_language(model_path: &str, language: &str) -> Result<()> {
+    let filename = std::path::Path::new(model_path)
+        .file_name()
+        .and_then(|f| f.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    if filename.contains("distil") && language != "en" {
+        anyhow::bail!(
+            "Model '{}' is a distil variant (English-only). \
+             Cannot use with language '{}'. \
+             Use a multilingual model (base, small, medium, large-v2, large-v3, turbo).",
+            filename,
+            language,
+        );
+    }
+    Ok(())
+}
+
 pub struct WhisperEngine {
     ctx: WhisperContext,
     prev_context: String,
@@ -44,6 +66,7 @@ pub struct WhisperEngine {
 
 impl WhisperEngine {
     pub fn new(model_path: &str, language: &str) -> Result<Self> {
+        validate_whisper_model_language(model_path, language)?;
         let ctx = WhisperContext::new_with_params(model_path, WhisperContextParameters::default())
             .context("Failed to load Whisper model")?;
         Ok(Self {

@@ -172,12 +172,26 @@ const linuxCtrlSpace: ComboChecker = combo => {
     return null;
 };
 
+const linuxComboUnreliable: ComboChecker = combo => {
+    // On Linux (especially Wayland/evdev), modifier combos are unreliable:
+    // the first keydown event of the modifier leaks to the focused app
+    // before the combo is detected. Single dedicated keys don't have this issue.
+    if (combo.ctrl || combo.alt || combo.shift || combo.meta) {
+        return {
+            severity: 'warning',
+            message:
+                'Modifier combos on Linux may leak the first key press to the focused app (especially on Wayland). Single-key hotkeys (Scroll Lock, Pause, F13+) are more reliable.',
+        };
+    }
+    return null;
+};
+
 // --- Platform constraint registry ---
 
 const PLATFORM_CHECKERS: Record<Platform, ComboChecker[]> = {
     windows: [noModifier, winReserved, winConflicts, winCtrlShiftLayout],
     macos: [noModifier, macReserved, macSequoiaModifier, macOptionGrave],
-    linux: [noModifier, linuxAltGrave, linuxSuperConflict, linuxCtrlShiftLayout, linuxCtrlSpace],
+    linux: [linuxComboUnreliable, noModifier, linuxAltGrave, linuxSuperConflict, linuxCtrlShiftLayout, linuxCtrlSpace],
 };
 
 /**

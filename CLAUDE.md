@@ -216,6 +216,7 @@ app → pages → widgets → features → entities → shared
 - `stt-engine-resolved` — какой STT engine был фактически выбран
 - `subcommand-match` — subcommand recognized (command, action, confidence, tier, params)
 - `subcommand-timeout` — AwaitingSubcommand timed out (10s)
+- `overlay-capability-degraded` — overlay feature failed (Wayland): `{ capability: string, error: string }`
 - Ошибки аудио-пайплайна — событие `audio-error` (НЕ generic `error`)
 
 **PipelineHandle (managed state):**
@@ -228,6 +229,17 @@ app → pages → widgets → features → entities → shared
 
 - Все payload/model структуры (`AudioMode`, `ModelInfo`, `ModelStatus`, `WakeCommand`, etc.) живут в `audio/mod.rs`
 - `commands.rs` — только Tauri command handlers + platform-specific logic (`get_models_dir`)
+
+**Model validation:**
+
+- `stt.rs` валидирует Whisper модель при загрузке: distil-\* модели English-only, использование с `language != "en"` → ошибка
+- Валидация по имени файла (convention: tiny/base/small/medium/large-v*/turbo = multilingual, distil-* = English-only)
+
+**Text injection (paste.rs):**
+
+- X11: `Ctrl+V` (стандартный GUI paste)
+- Wayland: `Ctrl+Shift+V` + log::warn о возможной проблеме с non-English раскладкой
+- macOS: `Cmd+V`, Windows: `Ctrl+V` (с release held modifiers)
 
 **Serde & wire format stability:**
 

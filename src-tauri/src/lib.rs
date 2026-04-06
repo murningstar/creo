@@ -116,22 +116,42 @@ pub fn run() {
                             - window_phys
                             - taskbar_phys;
 
-                        let _ = overlay.set_position(tauri::Position::Physical(
+                        if let Err(e) = overlay.set_position(tauri::Position::Physical(
                             tauri::PhysicalPosition::new(x, y),
-                        ));
+                        )) {
+                            log::warn!("Failed to position overlay window: {e}");
+                        }
                     }
                 }
                 // Enable click-through by default
-                let _ = overlay.set_ignore_cursor_events(true);
+                if let Err(e) = overlay.set_ignore_cursor_events(true) {
+                    log::warn!("Failed to set overlay click-through: {e}");
+                    let _ = app.emit("overlay-capability-degraded", serde_json::json!({
+                        "capability": "click_through",
+                        "error": e.to_string(),
+                    }));
+                }
 
                 // Dev: keep in Alt+Tab for F12 DevTools access
                 // Prod: hide from taskbar/Alt+Tab
                 if !cfg!(debug_assertions) {
-                    let _ = overlay.set_skip_taskbar(true);
+                    if let Err(e) = overlay.set_skip_taskbar(true) {
+                        log::warn!("Failed to hide overlay from taskbar: {e}");
+                    }
                 }
 
                 // Show the overlay window (starts hidden in config)
-                let _ = overlay.show();
+                if let Err(e) = overlay.show() {
+                    log::warn!("Failed to show overlay window: {e}");
+                }
+
+                // Wayland: alwaysOnTop and ignoreCursorEvents may not work reliably
+                if system::detect::detect_display_server() == system::detect::DisplayServer::Wayland {
+                    log::warn!(
+                        "Wayland detected: overlay alwaysOnTop and click-through may not work reliably. \
+                         See .claude/docs/platform.md for details."
+                    );
+                }
             }
 
             // --- System tray ---

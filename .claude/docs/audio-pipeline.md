@@ -50,6 +50,8 @@ Tensor interface (v6):
 | Parakeet TDT 0.6B v3 INT8 | Main STT (ONNX Runtime)                        | ~640 MB     | ONNX        |
 | Whisper models via ct2rs  | Отложен (оптимизация пограничных конфигураций) | 500MB-1.5GB | CTranslate2 |
 
+**Model validation:** `stt.rs` проверяет имя файла при загрузке Whisper модели. distil-\* модели English-only — при `language != "en"` возвращает ошибку вместо silent wrong-language output. Валидные multilingual модели: tiny, base, small, medium, large-v2, large-v3, turbo.
+
 ## Hardware Acceleration Coverage
 
 | Конфигурация                     | Текущее ускорение                                             | Выжат максимум?      | Что нужно для максимума                                                                                                                                                                              |
@@ -71,6 +73,8 @@ Tensor interface (v6):
 **Кого НЕ затрагивает:** AMD Ryzen (MKL не оптимизирован для AMD), любая конфигурация с GPU (GPU и так быстрее).
 **Статус:** Отложен. Parakeet через ONNX Runtime на CPU уже 30x real-time — быстрее чем ct2rs + Whisper + MKL. ct2rs актуален только для Whisper fallback (99 languages) на Intel CPU без GPU.
 **Когда делать:** Когда все основные фичи реализованы и нужна финальная оптимизация CPU performance для Intel-only пользователей.
+**Замеченный benchmark:** RTF ~1.10 для whisper turbo на i5-12450H (int8, CPU) — хороший baseline для ct2rs.
+**distil-large-v3 непригодна для мультиязычного:** RTF ~0.94 (быстрее turbo), но выдаёт английский текст вместо русского при `language="ru"`, `task="transcribe"` — исключена из кандидатов для RU.
 
 **Минусы внедрения ct2rs (причины отложения):**
 

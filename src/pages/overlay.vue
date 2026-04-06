@@ -266,8 +266,13 @@
                 try {
                     await getCurrentWindow().setIgnoreCursorEvents(event.payload);
                 } catch (e) {
-                    console.warn('Failed to set click-through:', e);
+                    console.error('Failed to set click-through:', e);
                 }
+            }),
+
+            // Wayland degradation: backend reports that a capability failed
+            listen<{ capability: string; error: string }>('overlay-capability-degraded', event => {
+                console.error(`Overlay degraded: ${event.payload.capability} — ${event.payload.error}`);
             }),
         ]);
     });

@@ -227,7 +227,7 @@ Rust: `parakeet-rs` v0.3.4 (MIT/Apache-2.0), DirectML, CUDA, CPU fallback.
 
 - **Parakeet TDT 0.6B v3** (parakeet-rs) — **primary STT.** ONNX Runtime: CUDA/DirectML/CPU — все GPU-вендоры. 25 EU languages, native punctuation.
 - **Whisper base** (whisper-rs) — **fallback STT.** Текущий placeholder, остаётся как fallback после интеграции Parakeet.
-- **Whisper via ct2rs** (CTranslate2) — **отложен.** Актуален для оптимизации пограничных конфигураций (Intel CPU-only, 99 languages). Возвращаемся только после реализации всех основных фич. Блокеры и обоснование в audio-pipeline.md.
+- **Whisper via ct2rs** (CTranslate2) — **отложен.** Актуален для оптимизации пограничных конфигураций (Intel CPU-only, 99 languages). Возвращаемся только после реализации всех основных фич. Блокеры и обоснование в audio-pipeline.md. Замечено: RTF ~1.10 для turbo на i5-12450H (int8, CPU). **distil-large-v3 исключена** — быстрее (RTF ~0.94), но непригодна для мультиязычной транскрипции (выдаёт английский вместо русского при `language="ru"`).
 - Wake word detection использует отдельные ONNX модели (mel + embedding), НЕ STT движок.
 
 **Архитектурное различие Whisper vs Parakeet:**

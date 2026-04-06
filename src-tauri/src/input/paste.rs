@@ -70,24 +70,51 @@ fn simulate_paste() -> Result<()> {
 
     #[cfg(target_os = "linux")]
     {
-        // On Linux Wayland: always Ctrl+Shift+V (works in terminals and most GUI apps)
-        // On Linux X11: Ctrl+V for GUI, Ctrl+Shift+V for terminals
-        // For now: use Ctrl+Shift+V universally (simpler, works in more places)
-        enigo
-            .key(Key::Control, Direction::Press)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-        enigo
-            .key(Key::Shift, Direction::Press)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-        enigo
-            .key(Key::Unicode('v'), Direction::Click)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-        enigo
-            .key(Key::Shift, Direction::Release)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-        enigo
-            .key(Key::Control, Direction::Release)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let is_wayland = std::env::var("WAYLAND_DISPLAY").is_ok()
+            || std::env::var("XDG_SESSION_TYPE")
+                .map(|v| v == "wayland")
+                .unwrap_or(false);
+
+        if is_wayland {
+            // Wayland: Ctrl+Shift+V (works in terminals and most GUI apps).
+            // Known limitation: may fail with non-English keyboard layout —
+            // enigo simulates keycodes mapped to active layout, not physical 'v'.
+            // See .claude/docs/platform.md for details.
+            static WAYLAND_WARN: std::sync::Once = std::sync::Once::new();
+            WAYLAND_WARN.call_once(|| {
+                log::warn!(
+                    "Wayland paste: Ctrl+Shift+V may fail with non-English keyboard layout. \
+                     Consider switching to Type input method in Settings."
+                );
+            });
+
+            enigo
+                .key(Key::Control, Direction::Press)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            enigo
+                .key(Key::Shift, Direction::Press)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            enigo
+                .key(Key::Unicode('v'), Direction::Click)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            enigo
+                .key(Key::Shift, Direction::Release)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            enigo
+                .key(Key::Control, Direction::Release)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+        } else {
+            // X11: standard Ctrl+V (XTest handles this correctly)
+            enigo
+                .key(Key::Control, Direction::Press)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            enigo
+                .key(Key::Unicode('v'), Direction::Click)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            enigo
+                .key(Key::Control, Direction::Release)
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+        }
     }
 
     Ok(())
