@@ -24,7 +24,7 @@
 ## Hotkey
 
 - Default: зажатие (push-to-talk), не toggle
-- Комбинация по умолчанию: определяется по результатам research (минимум конфликтов)
+- Комбинация по умолчанию: `Ctrl+`` (backtick), определена по cross-platform research (.claude/docs/hotkeys/)
 - Полностью конфигурируемая: record shortcut UI в settings
 - Режим: segmented control Нажатие (toggle) / Зажатие (push-to-talk)
 - НЕ показывается в wizard — сообщается модально после завершения wizard

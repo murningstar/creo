@@ -237,13 +237,13 @@ Rust: `parakeet-rs` v0.3.4 (MIT/Apache-2.0), DirectML, CUDA, CPU fallback.
 
 ### Dictation Segmentation
 
-**Текущие root causes проблем:**
+**Root causes проблем (на момент анализа, March 2026):**
 
-1. `set_no_context(true)` в stt.rs (WhisperEngine) — **явно отключает** context carry-over
-2. `VAD_SILENCE_TIMEOUT_MS = 300` — слишком агрессивно для dictation
-3. Нет audio overlap — жёсткие VAD-разрывы
-4. Whisper tiny — неадекватен для не-английского
-5. Нет hallucination filtering
+1. ~~`set_no_context(true)`~~ — **FIXED:** `set_no_context(false)` + `initial_prompt` context carry-over в stt.rs
+2. ~~`VAD_SILENCE_TIMEOUT_MS = 300` для dictation~~ — **FIXED:** mode-dependent: 300ms standby, 800ms dictation
+3. ~~Нет audio overlap~~ — **FIXED:** 500ms pre-buffer (8000 samples) в pipeline.rs
+4. Whisper base — ограничения для не-английского (target: Parakeet TDT)
+5. Hallucination filtering — частично (no_speech_prob > 0.6 в stt.rs)
 
 **Наблюдаемые симптомы:**
 

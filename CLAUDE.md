@@ -62,7 +62,7 @@
 - **embedding.rs** — shared EmbeddingExtractor (mel+embedding ONNX), DTW utilities, FrameSequence type, `save_frames_file()`/`load_frames_file()`. Используется в wakeword.rs и subcommand.rs
 - **subcommand.rs** — SubcommandCascade, SubcommandTier trait, DtwTier, manifest types (SubcommandDef, ParametricTemplate, SlotDef)
 - **capture.rs** — AudioCapture (cpal wrapper), AudioResampler, `capture_speech_vad()` (shared VAD capture loop)
-- **pipeline.rs** — оркестрация: 3 потока (capture, VAD processing, transcription), mode transitions, silence timeouts (300ms standby / 800ms dictation), audio overlap (500ms), event emission
+- **pipeline.rs** — оркестрация: 2 потока (processing + transcription; cpal capture внутри processing thread, Stream is !Send), mode transitions, silence timeouts (300ms standby / 800ms dictation), audio overlap (500ms), event emission
 - **input/** — `mod.rs` (TextInputMethod enum: Paste/Type), `injector.rs` (trait + dispatch), `paste.rs` (PasteInjector: arboard + Ctrl+V/Cmd+V), `typer.rs` (TypeInjector: enigo char-by-char)
 - **system/detect.rs** — SystemInfo, GpuVendor, DisplayServer, detect_system(), detect_display_server(). GPU через Vulkan/ash с Drop-guard
 - **rodio/cpal** — звуковой feedback
@@ -316,6 +316,9 @@ pnpm tauri:build     # Tauri production build
 # Lint (use --quiet for minimal output)
 pnpm exec eslint --quiet .
 pnpm format          # Prettier
+
+# Rust tests (run after any serde type changes — snapshot tests catch wire format drift)
+cd src-tauri && cargo test
 ```
 
 ---
@@ -326,19 +329,28 @@ pnpm format          # Prettier
 
 **При изменении кода — обновлять ВСЕ затронутые документы в том же коммите.** Stale docs = stale decisions = bugs from misalignment.
 
+**Иерархия авторитетности:** `CLAUDE.md` — authoritative spec. При противоречии между документами — обновлять другой документ, не CLAUDE.md (если только CLAUDE.md сам не устарел). Memory файлы управляются системой auto-memory и НЕ покрываются этим протоколом.
+
 **Документ → когда обновлять:**
 
-| Документ                                 | Обновлять при изменениях в                                                                                                                                                                                                         |
-| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **`CLAUDE.md`**                          | Добавление/удаление entity, feature, module. Изменение FSD структуры. Новые Tauri events. Изменение conventions (naming, serde, store patterns). Изменение commands/scripts. Любое изменение проектных правил                      |
-| **`README.md`**                          | Roadmap статусы (фича done/planned). ML модели (добавление/замена/удаление). Build prerequisites. Architecture diagram (pipeline flow). Known issues (resolved/new)                                                                |
-| **`.claude/docs/audio-pipeline.md`**     | Изменение VAD (chunk size, model version, threshold). Добавление/замена ML модели. Silence timeouts. Hardware acceleration. Auto-config logic. STT engine changes                                                                  |
-| **`.claude/docs/evolution-plan.md`**     | Архитектурные решения (tier добавлен/убран, модель заменена). DTW параметры (threshold, band). Milestone завершён (обновить сводную таблицу). Мониторируемая технология стала viable. Dictation tuning (overlap, silence, context) |
-| **`.claude/docs/architecture-audit.md`** | Фикс открытого finding (M5). Реализация Future-proofing item (F1-F3). Новый аудит                                                                                                                                                  |
-| **`.claude/docs/platform.md`**           | Изменения в `input/paste.rs`, overlay window поведение, build workarounds, добавление macOS support, data directory paths                                                                                                          |
-| **`.claude/docs/ux-requirements.md`**    | Overlay visual states. Новые banners/guides. Wizard steps. Text input modes. Hotkey поведение. History design                                                                                                                      |
-| **`.claude/docs/next-session.md`**       | Завершение TODO из списка. Новые known issues. **Перезаписывать в конце каждой рабочей сессии**                                                                                                                                    |
-| **`.claude/docs/hotkeys/*.md`**          | Изменение hotkey implementation, default combo, platform-specific поведение                                                                                                                                                        |
+| Документ                                 | Обновлять при изменениях в                                                                                                                                                                                                                                                                  |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`CLAUDE.md`**                          | Добавление/удаление entity, feature, Rust module. Изменение FSD структуры. Новые Tauri events. Conventions (naming, serde, store). Commands/scripts. Dependencies (Cargo crate, Nuxt module, Tauri plugin). Tauri config (port, window size, tray). Любое изменение проектных правил        |
+| **`README.md`**                          | Roadmap статусы. ML модели (добавление/замена/удаление, URL, filename). Build prerequisites. Pipeline architecture diagram. Known issues. Wake commands (testing instructions reference конкретные фразы). Setup workflow                                                                   |
+| **`.claude/docs/audio-pipeline.md`**     | VAD (chunk size, model version, threshold). ML модели. Silence timeouts. Hardware acceleration. Auto-config. STT engine selection/config/fallback. **Wake word pipeline flow** (команды, routing, AwaitingSubcommand timeout). ct2rs blocker resolution                                     |
+| **`.claude/docs/evolution-plan.md`**     | Архитектурные решения (tier добавлен/убран, модель заменена). DTW параметры. Milestone завершён (обновить сводную таблицу). Мониторируемая технология стала viable. Dictation tuning. **Subcommand cascade logic** (tier ordering, fallback, Vosk/Qwen3 integration approach, GBNF grammar) |
+| **`.claude/docs/architecture-audit.md`** | Фикс любого открытого/partially-fixed finding (M5, H3, H6). Реализация Future-proofing item (F1-F3). Регрессия ранее fixed finding. Новый аудит                                                                                                                                             |
+| **`.claude/docs/platform.md`**           | Text injection implementation (любые файлы в `input/`). Overlay window поведение. Build/compiler workarounds. macOS support. Data directory paths. Tray поведение. UIPI/elevation. Installer config                                                                                         |
+| **`.claude/docs/ux-requirements.md`**    | Overlay visual states. Banners/guides. Wizard steps. Text input modes. Hotkey поведение. History design. Wake word enrollment flow (кол-во samples, метод)                                                                                                                                  |
+| **`.claude/docs/next-session.md`**       | Завершение TODO из списка. Новые known issues. **Перезаписывать в конце каждой рабочей сессии**                                                                                                                                                                                             |
+| **`.claude/docs/hotkeys/*.md`**          | Hotkey implementation, default combo, platform-specific поведение. Upstream dependency updates (ashpd, global-shortcut crate). `hotkey-constraints.ts` logic                                                                                                                                |
+
+**Дополнительные директивы:**
+
+- При изменении payload Tauri event — проверять `pages/overlay.vue` (прямой consumer events, не через audio store)
+- При изменении типов с `#[derive(Serialize)]` — запускать `cargo test` (snapshot тесты ловят wire format drift)
+- При добавлении нового документа — добавлять строку в таблицу выше
+- При удалении документа — сначала убедиться что вся информация сохранена в других docs, убрать строку из таблицы
 
 ### UX/UI Protocol
 

@@ -153,7 +153,7 @@ Microphone (cpal) → Resample 48kHz→16kHz (rubato) → Silero VAD v6 (ort/ONN
     → Tauri events → Vue frontend
 ```
 
-Three threads: audio capture, VAD processing, transcription (DTW + STT). Connected via crossbeam channels.
+Two pipeline threads: processing (VAD + cpal capture internally) and transcription (DTW + STT). Connected via crossbeam channels.
 
 ## Roadmap
 
@@ -168,7 +168,7 @@ Statuses: `done`, `in-progress`, `planned`, `requires design` (UX/UI must be agr
 | Silero VAD (ort/ONNX)               | done   | 512-sample chunks, threshold 0.5                                          |
 | whisper-rs transcription            | done   | Base model (~150MB) as placeholder for both wake word and dictation       |
 | Wake word detection (embedding+DTW) | done   | Google speech-embedding + DTW. 3 commands: приём, вписывай, готово        |
-| Pipeline orchestration (3 threads)  | done   | Processing + Transcription + Capture, crossbeam channels                  |
+| Pipeline orchestration (2 threads)  | done   | Processing (includes cpal capture) + Transcription, crossbeam channels    |
 | Tauri IPC (events + commands)       | done   | start/stop_listening, test_capture, check_models                          |
 | Model check + banner                | done   | check_models command, platform-aware paths, UI banner when models missing |
 | Frontend state sync                 | done   | Pinia store + Tauri event listeners                                       |
@@ -185,7 +185,7 @@ Statuses: `done`, `in-progress`, `planned`, `requires design` (UX/UI must be agr
 | Subcommand cascade architecture | done     | —            | embedding.rs, SubcommandTier trait, DtwTier (Tier 1), SubcommandCascade, capture_speech_vad() shared VAD loop                                          |
 | parakeet-rs (Parakeet TDT)      | planned  | —            | Primary STT. ONNX Runtime (CUDA/DirectML/CPU). ~640MB INT8. Best Russian WER, native punctuation. Rust crate: `parakeet-rs`                            |
 | ct2rs (CTranslate2)             | deferred | —            | Отложен до реализации всех основных фич. Для оптимизации пограничных конфигураций (Intel CPU-only). Блокеры в `.claude/docs/audio-pipeline.md`         |
-| enigo text injection            | planned  | —            | Hybrid: SendInput <100 chars, clipboard+paste for longer. **Requires design:** input mode setting (auto / always type / always paste)                  |
+| Text injection (Paste/Type)     | done     | —            | Paste (arboard clipboard + Ctrl+V) and Type (enigo char-by-char), user-selectable in settings. **Planned:** hybrid auto-switching by text length       |
 | Sound feedback (rodio/cpal)     | planned  | —            | **Requires design:** which sounds, on which events (wake word recognition? start/stop dictation?)                                                      |
 | Kando integration               | planned  | —            | **Requires design:** launch mechanism (shell command? hotkey? IPC?)                                                                                    |
 | Hotkey fallback                 | planned  | —            | **Requires design:** which key, configurability, global hotkey via Tauri                                                                               |
