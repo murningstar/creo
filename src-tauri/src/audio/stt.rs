@@ -6,7 +6,55 @@
 //!
 //! Pipeline uses `Box<dyn DictationEngine>` — engine-agnostic.
 
+use std::path::Path;
+
 use anyhow::{Context, Result};
+
+/// Resolve which STT engine to use based on user preference and available models.
+/// - "auto": Parakeet if model dir exists, else Whisper (original behavior)
+/// - "parakeet": require Parakeet model dir
+/// - "whisper": require Whisper model file
+pub fn resolve_stt_engine(
+    models_dir: &Path,
+    parakeet_dir_name: &str,
+    whisper_filename: &str,
+    preference: &str,
+) -> std::result::Result<&'static str, String> {
+    match preference {
+        "parakeet" => {
+            let parakeet_dir = models_dir.join(parakeet_dir_name);
+            if parakeet_dir.exists() && parakeet_dir.is_dir() {
+                Ok("parakeet")
+            } else {
+                Err(format!(
+                    "Parakeet model not found. Place {}/ directory in: {}",
+                    parakeet_dir_name,
+                    models_dir.to_string_lossy()
+                ))
+            }
+        }
+        "whisper" => {
+            let whisper_path = models_dir.join(whisper_filename);
+            if whisper_path.exists() {
+                Ok("whisper")
+            } else {
+                Err(format!(
+                    "Whisper model not found: {}",
+                    whisper_path.to_string_lossy()
+                ))
+            }
+        }
+        _ => {
+            // "auto" or any unknown value: Parakeet if available, else Whisper
+            let parakeet_dir = models_dir.join(parakeet_dir_name);
+            if parakeet_dir.exists() && parakeet_dir.is_dir() {
+                Ok("parakeet")
+            } else {
+                Ok("whisper")
+            }
+        }
+    }
+}
 
 /// Result of a dictation transcription.
 pub struct DictationResult {

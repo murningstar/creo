@@ -24,16 +24,11 @@ export const usePlatformStore = defineStore('platform', () => {
         isNativePlatform.value ? `Platform: ${currentNativePlatform.value}` : 'Platform: Web Browser'
     );
 
-    const __setCurrentNativePlatform = (platform: CurrentNativePlatform) => {
-        _currentNativePlatform.value = platform;
-    };
-
     return {
         currentNativePlatform,
         isNativePlatform,
         isNativeDesktop,
         isWebBrowser,
         platformLabel,
-        __setCurrentNativePlatform,
     };
 });

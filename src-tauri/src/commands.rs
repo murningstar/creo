@@ -2,14 +2,16 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use serde::Serialize;
 use tauri::{AppHandle, State};
 
 use tauri::Emitter;
 
 use crate::audio::capture::{AudioCapture, AudioResampler};
 use crate::audio::pipeline;
-use crate::audio::{AudioMode, ModelInfo, ModelStatus, PipelineHandle, SttEngineResolvedPayload};
+use crate::audio::{
+    AudioMode, ModelInfo, ModelStatus, PipelineHandle, RecordResult, SttEngineResolvedPayload,
+    WakeCommandInfo,
+};
 use crate::input::injector;
 use crate::input::TextInputMethod;
 use crate::system::detect::{self, SystemInfo};
@@ -85,46 +87,6 @@ pub fn check_models() -> ModelStatus {
     }
 }
 
-/// Resolve STT engine from user preference.
-/// - "auto": Parakeet if model dir exists, else Whisper (original behavior)
-/// - "parakeet": require Parakeet model dir
-/// - "whisper": require Whisper model file
-fn resolve_stt_engine(preference: &str) -> Result<&'static str, String> {
-    let dir = get_models_dir();
-    match preference {
-        "parakeet" => {
-            let parakeet_dir = dir.join(PARAKEET_MODEL_DIR_NAME);
-            if parakeet_dir.exists() && parakeet_dir.is_dir() {
-                Ok("parakeet")
-            } else {
-                Err(format!(
-                    "Parakeet model not found. Place parakeet-tdt/ directory in: {}",
-                    dir.to_string_lossy()
-                ))
-            }
-        }
-        "whisper" => {
-            let whisper_path = dir.join(WHISPER_DICTATION_MODEL_FILENAME);
-            if whisper_path.exists() {
-                Ok("whisper")
-            } else {
-                Err(format!(
-                    "Whisper model not found: {}",
-                    whisper_path.to_string_lossy()
-                ))
-            }
-        }
-        _ => {
-            // "auto" or any unknown value: Parakeet if available, else Whisper
-            let parakeet_dir = dir.join(PARAKEET_MODEL_DIR_NAME);
-            if parakeet_dir.exists() && parakeet_dir.is_dir() {
-                Ok("parakeet")
-            } else {
-                Ok("whisper")
-            }
-        }
-    }
-}
 
 fn start_pipeline_with_mode(
     app: AppHandle,
@@ -147,7 +109,12 @@ fn start_pipeline_with_mode(
         ));
     }
 
-    let engine_type = resolve_stt_engine(stt_engine)?;
+    let engine_type = crate::audio::stt::resolve_stt_engine(
+        &dir,
+        PARAKEET_MODEL_DIR_NAME,
+        WHISPER_DICTATION_MODEL_FILENAME,
+        stt_engine,
+    )?;
     log::info!("STT engine: {} (preference: {})", engine_type, stt_engine);
 
     let _ = app.emit(
@@ -387,8 +354,8 @@ pub fn record_wake_sample(
 ) -> Result<RecordResult, String> {
     validate_command_name(&command_name)?;
 
+    use crate::audio::capture::capture_speech_vad;
     use crate::audio::wakeword::WakeWordDetector;
-    use crate::audio::vad::SileroVad;
     use crate::audio::WakeAction;
 
     let dir = get_models_dir();
@@ -402,69 +369,7 @@ pub fn record_wake_sample(
         return Err("Models not found".to_string());
     }
 
-    // Start capture + VAD
-    let (capture, rx, sample_rate) = AudioCapture::start().map_err(|e| e.to_string())?;
-    let mut resampler = AudioResampler::new(sample_rate).map_err(|e| e.to_string())?;
-    let mut vad = SileroVad::new(&vad_path.to_string_lossy()).map_err(|e| e.to_string())?;
-
-    let chunk_size = SileroVad::chunk_size();
-    let mut vad_buffer: Vec<f32> = Vec::new();
-    let mut speech_buffer: Vec<f32> = Vec::new();
-    let mut is_speaking = false;
-    let mut silence_start: Option<Instant> = None;
-    let mut speech_detected = false;
-    let timeout = Instant::now();
-
-    // Wait up to 5 seconds for speech, then record until 300ms silence
-    while timeout.elapsed() < Duration::from_secs(5) {
-        if let Ok(chunk) = rx.recv_timeout(Duration::from_millis(50)) {
-            let resampled = resampler.process(&chunk);
-            vad_buffer.extend_from_slice(&resampled);
-
-            while vad_buffer.len() >= chunk_size {
-                let vad_chunk: Vec<f32> = vad_buffer.drain(..chunk_size).collect();
-
-                let is_speech = vad
-                    .is_speech(&vad_chunk)
-                    .unwrap_or(false);
-
-                if is_speech {
-                    silence_start = None;
-                    if !is_speaking {
-                        is_speaking = true;
-                        speech_detected = true;
-                        log::info!("Wake sample: speech started");
-                    }
-                    speech_buffer.extend_from_slice(&vad_chunk);
-                } else if is_speaking {
-                    speech_buffer.extend_from_slice(&vad_chunk);
-                    if silence_start.is_none() {
-                        silence_start = Some(Instant::now());
-                    }
-                    if let Some(start) = silence_start {
-                        if start.elapsed() > Duration::from_millis(300) {
-                            log::info!("Wake sample: speech ended, {} samples", speech_buffer.len());
-                            break;
-                        }
-                    }
-                }
-            }
-
-            // Break outer loop if speech ended
-            if speech_detected && !is_speaking {
-                break;
-            }
-            if is_speaking && silence_start.map(|s| s.elapsed() > Duration::from_millis(300)).unwrap_or(false) {
-                break;
-            }
-        }
-    }
-
-    drop(capture);
-
-    if speech_buffer.is_empty() {
-        return Err("No speech detected. Please try again.".to_string());
-    }
+    let speech_buffer = capture_speech_vad(&vad_path, 5, 300, "Wake sample")?;
 
     // Extract mean embedding and save
     let mut detector = WakeWordDetector::new(
@@ -503,7 +408,7 @@ pub fn record_wake_sample(
     );
 
     // Signal running pipeline to reload wake word references
-    state.request_reload_references();
+    state.request_reload_references()?;
 
     Ok(RecordResult {
         command_name,
@@ -571,7 +476,7 @@ pub fn delete_wake_command(
     }
 
     // Signal running pipeline to reload wake word references
-    state.request_reload_references();
+    state.request_reload_references()?;
 
     Ok(())
 }
@@ -593,23 +498,6 @@ fn get_sample_count(command_name: &str) -> usize {
         .unwrap_or(0)
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct RecordResult {
-    #[serde(rename = "commandName")]
-    pub command_name: String,
-    #[serde(rename = "embeddingCount")]
-    pub embedding_count: usize,
-    #[serde(rename = "totalSamples")]
-    pub total_samples: usize,
-    pub path: String,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct WakeCommandInfo {
-    pub name: String,
-    #[serde(rename = "sampleCount")]
-    pub sample_count: usize,
-}
 
 // --- Subcommand management ---
 
@@ -680,7 +568,7 @@ pub fn create_subcommand(
         std::fs::create_dir_all(dir.join(&name)).map_err(|e| e.to_string())?;
     }
 
-    state.request_reload_references();
+    state.request_reload_references()?;
     log::info!("Created subcommand: '{}'", name);
     Ok(())
 }
@@ -714,7 +602,7 @@ pub fn delete_subcommand(
         std::fs::remove_dir_all(&cmd_dir).map_err(|e| e.to_string())?;
     }
 
-    state.request_reload_references();
+    state.request_reload_references()?;
     log::info!("Deleted subcommand: '{}'", name);
     Ok(())
 }
@@ -725,8 +613,8 @@ pub fn record_subcommand_sample(
     command_name: String,
     state: State<'_, Arc<PipelineHandle>>,
 ) -> Result<RecordResult, String> {
-    use crate::audio::subcommand::save_frames_file;
-    use crate::audio::vad::SileroVad;
+    use crate::audio::capture::capture_speech_vad;
+    use crate::audio::embedding::save_frames_file;
 
     validate_command_name(&command_name)?;
 
@@ -740,68 +628,7 @@ pub fn record_subcommand_sample(
         return Err("Models not found".to_string());
     }
 
-    // Start capture + VAD (same pattern as record_wake_sample)
-    let (capture, rx, sample_rate) =
-        crate::audio::capture::AudioCapture::start().map_err(|e| e.to_string())?;
-    let mut resampler =
-        crate::audio::capture::AudioResampler::new(sample_rate).map_err(|e| e.to_string())?;
-    let mut vad = SileroVad::new(&vad_path.to_string_lossy()).map_err(|e| e.to_string())?;
-
-    let chunk_size = SileroVad::chunk_size();
-    let mut vad_buffer: Vec<f32> = Vec::new();
-    let mut speech_buffer: Vec<f32> = Vec::new();
-    let mut is_speaking = false;
-    let mut silence_start: Option<std::time::Instant> = None;
-    let mut speech_detected = false;
-    let timeout = std::time::Instant::now();
-
-    while timeout.elapsed() < std::time::Duration::from_secs(5) {
-        if let Ok(chunk) = rx.recv_timeout(std::time::Duration::from_millis(50)) {
-            let resampled = resampler.process(&chunk);
-            vad_buffer.extend_from_slice(&resampled);
-
-            while vad_buffer.len() >= chunk_size {
-                let vad_chunk: Vec<f32> = vad_buffer.drain(..chunk_size).collect();
-                let is_speech = vad.is_speech(&vad_chunk).unwrap_or(false);
-
-                if is_speech {
-                    silence_start = None;
-                    if !is_speaking {
-                        is_speaking = true;
-                        speech_detected = true;
-                    }
-                    speech_buffer.extend_from_slice(&vad_chunk);
-                } else if is_speaking {
-                    speech_buffer.extend_from_slice(&vad_chunk);
-                    if silence_start.is_none() {
-                        silence_start = Some(std::time::Instant::now());
-                    }
-                    if let Some(start) = silence_start {
-                        if start.elapsed() > std::time::Duration::from_millis(300) {
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if speech_detected && !is_speaking {
-                break;
-            }
-            if is_speaking
-                && silence_start
-                    .map(|s| s.elapsed() > std::time::Duration::from_millis(300))
-                    .unwrap_or(false)
-            {
-                break;
-            }
-        }
-    }
-
-    drop(capture);
-
-    if speech_buffer.is_empty() {
-        return Err("No speech detected. Please try again.".to_string());
-    }
+    let speech_buffer = capture_speech_vad(&vad_path, 5, 300, "Subcommand sample")?;
 
     // Extract embeddings and save
     let mut extractor = crate::audio::embedding::EmbeddingExtractor::new(
@@ -859,7 +686,7 @@ pub fn record_subcommand_sample(
         sample_count
     );
 
-    state.request_reload_references();
+    state.request_reload_references()?;
 
     Ok(RecordResult {
         command_name,

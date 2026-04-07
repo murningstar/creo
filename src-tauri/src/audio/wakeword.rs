@@ -23,7 +23,7 @@ use anyhow::{anyhow, Result};
 use ndarray::Array1;
 
 use super::embedding::{
-    dtw_normalized_distance, EmbeddingExtractor, FrameSequence,
+    dtw_normalized_distance, load_frames_file, save_frames_file, EmbeddingExtractor, FrameSequence,
     DTW_DISTANCE_THRESHOLD, EMBEDDING_DIM, MIN_DETECTION_FRAMES,
 };
 use super::WakeAction;
@@ -246,7 +246,7 @@ impl WakeWordDetector {
 
         // Save frame sequence (.frames)
         let frames_path = cmd_dir.join(format!("sample_{}.frames", idx));
-        Self::save_frames_file(&frames_path, &frames)?;
+        save_frames_file(&frames_path, &frames)?;
         log::info!(
             "Saved reference frames: {} ({} frames × {} dims)",
             frames_path.display(),
@@ -340,63 +340,6 @@ impl WakeWordDetector {
         Ok(())
     }
 
-    // --- File I/O: frame sequences (.frames) ---
-
-    fn save_frames_file(path: &Path, frames: &[[f32; EMBEDDING_DIM]]) -> Result<()> {
-        let mut data: Vec<u8> = Vec::new();
-        let n_frames = frames.len() as u32;
-        let n_dims = EMBEDDING_DIM as u32;
-        data.extend_from_slice(&n_frames.to_le_bytes());
-        data.extend_from_slice(&n_dims.to_le_bytes());
-        for frame in frames {
-            for &val in frame {
-                data.extend_from_slice(&val.to_le_bytes());
-            }
-        }
-        fs::write(path, &data)?;
-        Ok(())
-    }
-
-    fn load_frames_file(path: &Path) -> Result<FrameSequence> {
-        let data = fs::read(path)?;
-        if data.len() < 8 {
-            return Err(anyhow!("Frames file too small"));
-        }
-
-        let n_frames = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
-        let n_dims = u32::from_le_bytes([data[4], data[5], data[6], data[7]]) as usize;
-
-        if n_dims != EMBEDDING_DIM {
-            return Err(anyhow!(
-                "Dims mismatch: expected {}, got {}",
-                EMBEDDING_DIM,
-                n_dims
-            ));
-        }
-
-        let expected = 8 + n_frames * n_dims * 4;
-        if data.len() < expected {
-            return Err(anyhow!("Frames file truncated"));
-        }
-
-        let mut frames = Vec::with_capacity(n_frames);
-        for i in 0..n_frames {
-            let mut frame = [0.0f32; EMBEDDING_DIM];
-            for j in 0..n_dims {
-                let offset = 8 + (i * n_dims + j) * 4;
-                frame[j] = f32::from_le_bytes([
-                    data[offset],
-                    data[offset + 1],
-                    data[offset + 2],
-                    data[offset + 3],
-                ]);
-            }
-            frames.push(frame);
-        }
-
-        Ok(frames)
-    }
-
     fn load_all_frame_references(
         dir: &Path,
     ) -> Result<HashMap<String, Vec<FrameSequence>>> {
@@ -417,7 +360,7 @@ impl WakeWordDetector {
             if let Ok(files) = fs::read_dir(entry.path()) {
                 for file in files.flatten() {
                     if file.path().extension().and_then(|e| e.to_str()) == Some("frames") {
-                        match Self::load_frames_file(&file.path()) {
+                        match load_frames_file(&file.path()) {
                             Ok(frames) => samples.push(frames),
                             Err(e) => {
                                 log::warn!("Failed to load {}: {}", file.path().display(), e)

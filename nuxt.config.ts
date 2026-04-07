@@ -112,17 +112,7 @@ export default defineNuxtConfig(
                 middleware: 'app/middleware',
             },
 
-            /* Auto-imports for components from `/shared` */
-            components: {
-                dirs: [
-                    {
-                        path: '.',
-                        pattern: '{shared}/**/ui/*/*.vue',
-                        prefix: 'c',
-                        pathPrefix: false,
-                    },
-                ],
-            },
+            components: false,
             // #endregion
         },
         {

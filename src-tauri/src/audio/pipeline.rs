@@ -46,7 +46,9 @@ pub fn start_pipeline(
         bounded(TRANSCRIPTION_CHANNEL_CAPACITY);
 
     // Store sender in PipelineHandle so commands can send reload signals
-    handle.set_trans_tx(trans_tx.clone());
+    handle
+        .set_trans_tx(trans_tx.clone())
+        .map_err(|e| anyhow::anyhow!(e))?;
     let (result_tx, result_rx): (Sender<TranscriptionResult>, Receiver<TranscriptionResult>) =
         bounded(TRANSCRIPTION_CHANNEL_CAPACITY);
 

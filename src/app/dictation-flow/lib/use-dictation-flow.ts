@@ -12,13 +12,13 @@ const FINISHING_TIMEOUT_MS = 500;
 const _phase = ref<DictationPhase>(DictationPhase.Inactive);
 const _lastInjectedText = ref('');
 const _error = ref<string | null>(null);
-const _unlisten = ref<UnlistenFn[]>([]);
-const _finishingTimeout = ref<ReturnType<typeof setTimeout> | null>(null);
+let _unlisten: UnlistenFn[] = [];
+let _finishingTimeout: ReturnType<typeof setTimeout> | null = null;
 
 function clearFinishingTimeout() {
-    if (_finishingTimeout.value) {
-        clearTimeout(_finishingTimeout.value);
-        _finishingTimeout.value = null;
+    if (_finishingTimeout) {
+        clearTimeout(_finishingTimeout);
+        _finishingTimeout = null;
     }
 }
 
@@ -29,7 +29,7 @@ function transitionToInactive() {
 
 function startFinishingTimeout() {
     clearFinishingTimeout();
-    _finishingTimeout.value = setTimeout(() => {
+    _finishingTimeout = setTimeout(() => {
         if (_phase.value === DictationPhase.Finishing) {
             transitionToInactive();
         }
@@ -41,7 +41,7 @@ export function useDictationFlow() {
 
     async function setupListeners() {
         // Guard: cleanup existing listeners before re-registering (handles HMR / reload)
-        if (_unlisten.value.length > 0) {
+        if (_unlisten.length > 0) {
             cleanup();
         }
 
@@ -140,15 +140,15 @@ export function useDictationFlow() {
             }),
         ]);
 
-        _unlisten.value = listeners;
+        _unlisten = listeners;
     }
 
     function cleanup() {
         clearFinishingTimeout();
-        for (const fn_ of _unlisten.value) {
+        for (const fn_ of _unlisten) {
             fn_();
         }
-        _unlisten.value = [];
+        _unlisten = [];
     }
 
     return {

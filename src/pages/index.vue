@@ -252,7 +252,7 @@
         REQUIRED_SAMPLES,
         BASE_COMMANDS,
         buildBaseCommandName,
-        type WakeActionType,
+        type WakeAction,
     } from '~/entities/wake-commands';
 
     const audioStore = useAudioStore();
@@ -289,7 +289,7 @@
     const modalOpen = ref(false);
     const modalStep = ref<'setup' | 'recording' | 'done'>('setup');
     const commandName = ref('');
-    const commandAction = ref<WakeActionType>('await_subcommand');
+    const commandAction = ref<WakeAction>('await_subcommand');
     const isEditing = ref(false);
 
     const modalTitle = computed(() => (isEditing.value ? `Edit: ${commandName.value}` : 'New Command'));

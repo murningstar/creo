@@ -38,21 +38,28 @@ pub struct GpuInfo {
 }
 
 #[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "lowercase")]
 pub enum GpuVendor {
+    #[serde(rename = "nvidia")]
     Nvidia,
+    #[serde(rename = "amd")]
     Amd,
+    #[serde(rename = "intel")]
     Intel,
+    #[serde(rename = "unknown")]
     Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "lowercase")]
 pub enum DisplayServer {
+    #[serde(rename = "x11")]
     X11,
+    #[serde(rename = "wayland")]
     Wayland,
+    #[serde(rename = "windows")]
     Windows,
+    #[serde(rename = "macos")]
     MacOS,
+    #[serde(rename = "unknown")]
     Unknown,
 }
 
@@ -127,6 +134,19 @@ fn detect_ram() -> RamInfo {
 ///   Need to detect integrated vs discrete and adjust recommendation accordingly.
 /// - Linux without vulkan-loader: GPU physically present but undetectable.
 ///   Could fall back to parsing /sys/class/drm/ or lspci output.
+/// Drop guard for Vulkan instance — ensures `destroy_instance` even on early return.
+struct VkInstanceGuard {
+    instance: ash::Instance,
+}
+
+impl Drop for VkInstanceGuard {
+    fn drop(&mut self) {
+        unsafe {
+            self.instance.destroy_instance(None);
+        }
+    }
+}
+
 fn detect_gpu() -> Option<GpuInfo> {
     // ash with "loaded" feature: runtime load, no link-time dependency.
     // Fails gracefully if Vulkan runtime is not installed.
@@ -143,13 +163,14 @@ fn detect_gpu() -> Option<GpuInfo> {
     };
 
     let instance = unsafe { entry.create_instance(&create_info, None).ok()? };
+    let guard = VkInstanceGuard { instance };
 
-    let devices = unsafe { instance.enumerate_physical_devices().ok()? };
+    let devices = unsafe { guard.instance.enumerate_physical_devices().ok()? };
 
     // Pick the best GPU (prefer discrete over integrated)
     let mut best: Option<GpuInfo> = None;
     for &device in &devices {
-        let props = unsafe { instance.get_physical_device_properties(device) };
+        let props = unsafe { guard.instance.get_physical_device_properties(device) };
         let name = props
             .device_name_as_c_str()
             .ok()
@@ -173,7 +194,7 @@ fn detect_gpu() -> Option<GpuInfo> {
         };
 
         // Sum DEVICE_LOCAL memory heaps for VRAM
-        let mem_props = unsafe { instance.get_physical_device_memory_properties(device) };
+        let mem_props = unsafe { guard.instance.get_physical_device_memory_properties(device) };
         let vram_bytes: u64 = mem_props.memory_heaps
             [..mem_props.memory_heap_count as usize]
             .iter()
@@ -200,8 +221,7 @@ fn detect_gpu() -> Option<GpuInfo> {
         }
     }
 
-    unsafe { instance.destroy_instance(None) };
-
+    // Guard dropped here — destroy_instance called automatically
     best
 }
 
@@ -231,5 +251,29 @@ fn detect_os() -> OsInfo {
     OsInfo {
         name: System::name().unwrap_or_else(|| "Unknown".to_string()),
         version: System::os_version().unwrap_or_else(|| "Unknown".to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pinned wire format for GpuVendor — if this fails, you changed a serialized value.
+    #[test]
+    fn gpu_vendor_serialization_stability() {
+        assert_eq!(serde_json::to_string(&GpuVendor::Nvidia).unwrap(), "\"nvidia\"");
+        assert_eq!(serde_json::to_string(&GpuVendor::Amd).unwrap(), "\"amd\"");
+        assert_eq!(serde_json::to_string(&GpuVendor::Intel).unwrap(), "\"intel\"");
+        assert_eq!(serde_json::to_string(&GpuVendor::Unknown).unwrap(), "\"unknown\"");
+    }
+
+    /// Pinned wire format for DisplayServer — if this fails, you changed a serialized value.
+    #[test]
+    fn display_server_serialization_stability() {
+        assert_eq!(serde_json::to_string(&DisplayServer::X11).unwrap(), "\"x11\"");
+        assert_eq!(serde_json::to_string(&DisplayServer::Wayland).unwrap(), "\"wayland\"");
+        assert_eq!(serde_json::to_string(&DisplayServer::Windows).unwrap(), "\"windows\"");
+        assert_eq!(serde_json::to_string(&DisplayServer::MacOS).unwrap(), "\"macos\"");
+        assert_eq!(serde_json::to_string(&DisplayServer::Unknown).unwrap(), "\"unknown\"");
     }
 }

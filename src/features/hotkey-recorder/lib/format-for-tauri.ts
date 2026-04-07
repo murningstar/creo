@@ -1,4 +1,4 @@
-import type { KeyCombo } from '~/shared/ui/keystroke-recorder/model/types';
+import type { KeyCombo } from '~/shared/ui/keystroke-recorder';
 
 function codeToTauriKey(code: string): string {
     if (code.startsWith('Key')) return code.slice(3); // KeyA → A

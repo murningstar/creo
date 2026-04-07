@@ -5,9 +5,10 @@ pub mod typer;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
 pub enum TextInputMethod {
+    #[serde(rename = "paste")]
     Paste,
+    #[serde(rename = "type")]
     Type,
 }
 
@@ -17,5 +18,17 @@ impl TextInputMethod {
             "type" => TextInputMethod::Type,
             _ => TextInputMethod::Paste,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pinned wire format for TextInputMethod — if this fails, you changed a serialized value.
+    #[test]
+    fn text_input_method_serialization_stability() {
+        assert_eq!(serde_json::to_string(&TextInputMethod::Paste).unwrap(), "\"paste\"");
+        assert_eq!(serde_json::to_string(&TextInputMethod::Type).unwrap(), "\"type\"");
     }
 }

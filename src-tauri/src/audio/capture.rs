@@ -5,6 +5,8 @@ use crossbeam_channel::{bounded, Receiver, Sender};
 use rubato::{
     Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
 };
+use std::path::Path;
+use std::time::{Duration, Instant};
 
 const TARGET_SAMPLE_RATE: u32 = 16000;
 const CHANNEL_CAPACITY: usize = 64;
@@ -139,4 +141,91 @@ impl AudioResampler {
 
         output
     }
+}
+
+/// Capture speech via VAD: wait for speech onset, record until silence timeout.
+/// Returns the speech audio buffer (16kHz mono f32).
+///
+/// Parameters:
+/// - `vad_model_path`: path to the Silero VAD ONNX model
+/// - `timeout_secs`: maximum seconds to wait for speech before giving up
+/// - `silence_ms`: milliseconds of silence after speech to consider speech ended
+/// - `label`: label for log messages (e.g., "Wake sample", "Subcommand sample")
+pub fn capture_speech_vad(
+    vad_model_path: &Path,
+    timeout_secs: u64,
+    silence_ms: u64,
+    label: &str,
+) -> Result<Vec<f32>, String> {
+    use super::vad::SileroVad;
+
+    let (capture, rx, sample_rate) = AudioCapture::start().map_err(|e| e.to_string())?;
+    let mut resampler = AudioResampler::new(sample_rate).map_err(|e| e.to_string())?;
+    let mut vad =
+        SileroVad::new(&vad_model_path.to_string_lossy()).map_err(|e| e.to_string())?;
+
+    let chunk_size = SileroVad::chunk_size();
+    let mut vad_buffer: Vec<f32> = Vec::new();
+    let mut speech_buffer: Vec<f32> = Vec::new();
+    let mut is_speaking = false;
+    let mut silence_start: Option<Instant> = None;
+    let mut speech_detected = false;
+    let timeout = Instant::now();
+    let silence_duration = Duration::from_millis(silence_ms);
+
+    while timeout.elapsed() < Duration::from_secs(timeout_secs) {
+        if let Ok(chunk) = rx.recv_timeout(Duration::from_millis(50)) {
+            let resampled = resampler.process(&chunk);
+            vad_buffer.extend_from_slice(&resampled);
+
+            while vad_buffer.len() >= chunk_size {
+                let vad_chunk: Vec<f32> = vad_buffer.drain(..chunk_size).collect();
+                let is_speech = vad.is_speech(&vad_chunk).unwrap_or(false);
+
+                if is_speech {
+                    silence_start = None;
+                    if !is_speaking {
+                        is_speaking = true;
+                        speech_detected = true;
+                        log::info!("{}: speech started", label);
+                    }
+                    speech_buffer.extend_from_slice(&vad_chunk);
+                } else if is_speaking {
+                    speech_buffer.extend_from_slice(&vad_chunk);
+                    if silence_start.is_none() {
+                        silence_start = Some(Instant::now());
+                    }
+                    if let Some(start) = silence_start {
+                        if start.elapsed() > silence_duration {
+                            log::info!(
+                                "{}: speech ended, {} samples",
+                                label,
+                                speech_buffer.len()
+                            );
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if speech_detected && !is_speaking {
+                break;
+            }
+            if is_speaking
+                && silence_start
+                    .map(|s| s.elapsed() > silence_duration)
+                    .unwrap_or(false)
+            {
+                break;
+            }
+        }
+    }
+
+    drop(capture);
+
+    if speech_buffer.is_empty() {
+        return Err("No speech detected. Please try again.".to_string());
+    }
+
+    Ok(speech_buffer)
 }

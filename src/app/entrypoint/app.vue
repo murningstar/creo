@@ -40,7 +40,7 @@
 </template>
 
 <script setup lang="ts">
-    import CreoLogo from '~/shared/ui/icons/ui/i-creo-logo.vue';
+    import { CreoLogo } from '~/shared/ui/icons';
     import { AudioMode, useAudioStore } from '~/entities/audio';
     import { usePlatformStore } from '~/entities/platform';
     import { useSettingsStore } from '~/entities/settings';

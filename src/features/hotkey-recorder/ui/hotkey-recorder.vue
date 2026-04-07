@@ -16,10 +16,9 @@
 </template>
 
 <script setup lang="ts">
-    import KeystrokeRecorder from '~/shared/ui/keystroke-recorder/keystroke-recorder.vue';
-    import type { KeyCombo } from '~/shared/ui/keystroke-recorder/model/types';
+    import { KeystrokeRecorder, type KeyCombo } from '~/shared/ui/keystroke-recorder';
     import { usePlatformStore } from '~/entities/platform';
-    import { validateHotkey } from '../model/hotkey-constraints';
+    import { validateHotkey } from '../lib/hotkey-constraints';
     import { formatForTauri } from '../lib/format-for-tauri';
 
     const props = withDefaults(

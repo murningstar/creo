@@ -3,7 +3,6 @@ pub mod embedding;
 pub mod pipeline;
 pub mod stt;
 pub mod subcommand;
-pub mod transcriber;
 pub mod vad;
 pub mod wakeword;
 
@@ -115,6 +114,26 @@ pub struct SubcommandMatchPayload {
     pub params: std::collections::HashMap<String, String>,
 }
 
+// --- Command result payloads ---
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RecordResult {
+    #[serde(rename = "commandName")]
+    pub command_name: String,
+    #[serde(rename = "embeddingCount")]
+    pub embedding_count: usize,
+    #[serde(rename = "totalSamples")]
+    pub total_samples: usize,
+    pub path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WakeCommandInfo {
+    pub name: String,
+    #[serde(rename = "sampleCount")]
+    pub sample_count: usize,
+}
+
 // --- Model info (for check_models command) ---
 
 #[derive(Debug, Clone, Serialize)]
@@ -177,19 +196,22 @@ impl PipelineHandle {
     }
 
     /// Store a reference to the transcription channel sender (set during pipeline start).
-    pub fn set_trans_tx(&self, tx: crossbeam_channel::Sender<TranscriptionRequest>) {
-        if let Ok(mut guard) = self.trans_tx.lock() {
-            *guard = Some(tx);
-        }
+    pub fn set_trans_tx(
+        &self,
+        tx: crossbeam_channel::Sender<TranscriptionRequest>,
+    ) -> Result<(), String> {
+        let mut guard = self.trans_tx.lock().map_err(|e| e.to_string())?;
+        *guard = Some(tx);
+        Ok(())
     }
 
     /// Send a signal to the transcription thread to reload wake word references.
-    pub fn request_reload_references(&self) {
-        if let Ok(guard) = self.trans_tx.lock() {
-            if let Some(tx) = guard.as_ref() {
-                let _ = tx.try_send(TranscriptionRequest::ReloadReferences);
-            }
+    pub fn request_reload_references(&self) -> Result<(), String> {
+        let guard = self.trans_tx.lock().map_err(|e| e.to_string())?;
+        if let Some(tx) = guard.as_ref() {
+            let _ = tx.try_send(TranscriptionRequest::ReloadReferences);
         }
+        Ok(())
     }
 
     pub fn current_mode(&self) -> AudioMode {

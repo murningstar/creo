@@ -70,13 +70,16 @@ pub fn run() {
             commands::record_subcommand_sample,
         ])
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
+            let log_level = if cfg!(debug_assertions) {
+                log::LevelFilter::Info
+            } else {
+                log::LevelFilter::Warn
+            };
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log_level)
+                    .build(),
+            )?;
 
             // Background model file polling (5s interval)
             let handle = app.handle().clone();
@@ -161,7 +164,7 @@ pub fn run() {
             let tray_menu = Menu::with_items(app, &[&show_item, &separator, &quit_item])?;
 
             let _tray = TrayIconBuilder::new()
-                .icon(app.default_window_icon().unwrap().clone())
+                .icon(app.default_window_icon().expect("default window icon must be set in tauri.conf.json5").clone())
                 .tooltip("Creo")
                 .menu(&tray_menu)
                 .show_menu_on_left_click(false)

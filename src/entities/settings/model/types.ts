@@ -1,4 +1,4 @@
-import type { KeyCombo } from '~/shared/ui/keystroke-recorder/model/types';
+import type { KeyCombo } from '~/shared/ui/keystroke-recorder';
 
 export type TextInputMethod = 'paste' | 'type';
 export type HotkeyMode = 'hold' | 'toggle';

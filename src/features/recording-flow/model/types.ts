@@ -1,8 +1,8 @@
-import type { WakeActionType } from '~/entities/wake-commands';
+import type { WakeAction } from '~/entities/wake-commands';
 
 export interface RecordingCommand {
     name: string;
     label: string;
-    action?: WakeActionType;
+    action?: WakeAction;
     requiredSamples: number;
 }

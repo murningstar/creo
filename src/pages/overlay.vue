@@ -59,21 +59,6 @@
                     class="draw-x"
                 />
             </svg>
-
-            <!-- Mini-badge for batch processing during dictation -->
-            <div v-if="showMiniBadge" class="mini-badge" :class="miniBadgeClass">
-                <div v-if="miniBadgeState === 'processing'" class="mini-spinner" />
-                <svg v-else-if="miniBadgeState === 'done'" class="mini-check" viewBox="0 0 12 12">
-                    <path
-                        d="M3 6l2 2 4-4"
-                        fill="none"
-                        stroke="currentColor"
-                        stroke-width="1.5"
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                    />
-                </svg>
-            </div>
         </div>
     </div>
 </template>
@@ -94,10 +79,7 @@
     const mode = ref<AudioMode>(AudioMode.Standby);
     const amplitude = ref(0);
     const transientState = ref<'success' | 'error' | null>(null);
-    const miniBadgeState = ref<'processing' | 'done' | null>(null);
-
     let transientTimer: ReturnType<typeof setTimeout> | null = null;
-    let miniBadgeTimer: ReturnType<typeof setTimeout> | null = null;
 
     // --- Computed ---
 
@@ -123,9 +105,6 @@
         }
     });
 
-    const showMiniBadge = computed(() => miniBadgeState.value !== null && isDictation.value);
-    const miniBadgeClass = computed(() => miniBadgeState.value);
-
     // --- Waveform bars ---
 
     const barHeights = computed(() => {
@@ -142,16 +121,6 @@
         transientTimer = setTimeout(() => {
             transientState.value = null;
         }, durationMs);
-    }
-
-    function showMiniBadgeBriefly(state: 'processing' | 'done', durationMs = 1000) {
-        if (miniBadgeTimer) clearTimeout(miniBadgeTimer);
-        miniBadgeState.value = state;
-        if (state === 'done') {
-            miniBadgeTimer = setTimeout(() => {
-                miniBadgeState.value = null;
-            }, durationMs);
-        }
     }
 
     // --- Dev: suppress devtools/Vite overlay (controlled from Settings via Tauri event) ---
@@ -241,15 +210,6 @@
 
             listen('audio-error', () => {
                 showTransient('error', 2000);
-            }),
-
-            // Batch processing events during dictation
-            listen('transcription-batch-start', () => {
-                showMiniBadgeBriefly('processing');
-            }),
-
-            listen('transcription-batch-done', () => {
-                showMiniBadgeBriefly('done');
             }),
 
             // Dev: toggle dev overlay suppression from Settings
@@ -482,45 +442,5 @@
         80% {
             transform: translateX(3px);
         }
-    }
-
-    /* --- Mini-badge --- */
-
-    .mini-badge {
-        position: absolute;
-        bottom: -2px;
-        right: -2px;
-        width: 18px;
-        height: 18px;
-        border-radius: 50%;
-        background-color: white;
-        box-shadow: 0 0 0 2px var(--color-creo-600, #3d6d85);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-
-    .mini-badge.processing {
-        background-color: white;
-    }
-
-    .mini-badge.done {
-        background-color: #22c55e;
-        box-shadow: 0 0 0 2px #22c55e;
-    }
-
-    .mini-spinner {
-        width: 10px;
-        height: 10px;
-        border: 2px solid #e5e7eb;
-        border-top-color: var(--color-creo-600, #3d6d85);
-        border-radius: 50%;
-        animation: spin 0.8s linear infinite;
-    }
-
-    .mini-check {
-        width: 12px;
-        height: 12px;
-        color: white;
     }
 </style>

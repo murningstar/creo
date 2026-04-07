@@ -1,6 +1,6 @@
 import { load, type Store } from '@tauri-apps/plugin-store';
 
-import type { KeyCombo } from '~/shared/ui/keystroke-recorder/model/types';
+import type { KeyCombo } from '~/shared/ui/keystroke-recorder';
 
 import type { HotkeyMode, SttEngine, TextInputMethod } from '../model/types';
 import { DEFAULT_SETTINGS, STORE_FILENAME, STORE_KEY } from '../model/types';

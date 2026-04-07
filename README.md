@@ -146,12 +146,14 @@ pnpm tauri:build
 ## Architecture
 
 ```
-Microphone (cpal) → Resample 48kHz→16kHz (rubato) → Silero VAD (ort/ONNX)
-    → speech detected → buffer → Whisper (whisper-rs) → wake word match / dictation text
+Microphone (cpal) → Resample 48kHz→16kHz (rubato) → Silero VAD v6 (ort/ONNX)
+    → speech detected → buffer
+        → [wake words]: Google speech-embedding 96-dim + DTW frame-level matching
+        → [dictation]:  whisper-rs base (placeholder until parakeet-rs)
     → Tauri events → Vue frontend
 ```
 
-Three threads: audio capture, VAD processing, whisper transcription. Connected via crossbeam channels.
+Three threads: audio capture, VAD processing, transcription (DTW + STT). Connected via crossbeam channels.
 
 ## Roadmap
 
@@ -160,17 +162,17 @@ Statuses: `done`, `in-progress`, `planned`, `requires design` (UX/UI must be agr
 <details>
 <summary><b>MVP (Audio Pipeline)</b> — done</summary>
 
-| Feature                            | Status | Details                                                                   |
-| ---------------------------------- | ------ | ------------------------------------------------------------------------- |
-| cpal capture + rubato resampling   | done   | 48kHz→16kHz mono f32                                                      |
-| Silero VAD (ort/ONNX)              | done   | 512-sample chunks, threshold 0.5                                          |
-| whisper-rs transcription           | done   | Base model (~150MB) as placeholder for both wake word and dictation       |
-| Wake word fuzzy matching (strsim)  | done   | 3 commands: приём, вписывай, готово                                       |
-| Pipeline orchestration (3 threads) | done   | Processing + Transcription + Capture, crossbeam channels                  |
-| Tauri IPC (events + commands)      | done   | start/stop_listening, test_capture, check_models                          |
-| Model check + banner               | done   | check_models command, platform-aware paths, UI banner when models missing |
-| Frontend state sync                | done   | Pinia store + Tauri event listeners                                       |
-| Basic pulse indicator              | done   | Pulse animation when not idle                                             |
+| Feature                             | Status | Details                                                                   |
+| ----------------------------------- | ------ | ------------------------------------------------------------------------- |
+| cpal capture + rubato resampling    | done   | 48kHz→16kHz mono f32                                                      |
+| Silero VAD (ort/ONNX)               | done   | 512-sample chunks, threshold 0.5                                          |
+| whisper-rs transcription            | done   | Base model (~150MB) as placeholder for both wake word and dictation       |
+| Wake word detection (embedding+DTW) | done   | Google speech-embedding + DTW. 3 commands: приём, вписывай, готово        |
+| Pipeline orchestration (3 threads)  | done   | Processing + Transcription + Capture, crossbeam channels                  |
+| Tauri IPC (events + commands)       | done   | start/stop_listening, test_capture, check_models                          |
+| Model check + banner                | done   | check_models command, platform-aware paths, UI banner when models missing |
+| Frontend state sync                 | done   | Pinia store + Tauri event listeners                                       |
+| Basic pulse indicator               | done   | Pulse animation when not idle                                             |
 
 </details>
 
@@ -180,7 +182,7 @@ Statuses: `done`, `in-progress`, `planned`, `requires design` (UX/UI must be agr
 | Feature                         | Status   | Dependencies | Details                                                                                                                                                |
 | ------------------------------- | -------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | STT engine selector             | done     | —            | Backend + persistence (auto/parakeet/whisper). Frontend settings type. UI card in settings deferred (blocked by auto-config UX)                        |
-| Subcommand cascade architecture | done     | —            | embedding.rs extracted, SubcommandTier trait, DtwTier (Tier 1), SubcommandCascade, 4 Tauri commands, `entities/subcommands/` entity                    |
+| Subcommand cascade architecture | done     | —            | embedding.rs, SubcommandTier trait, DtwTier (Tier 1), SubcommandCascade, capture_speech_vad() shared VAD loop                                          |
 | parakeet-rs (Parakeet TDT)      | planned  | —            | Primary STT. ONNX Runtime (CUDA/DirectML/CPU). ~640MB INT8. Best Russian WER, native punctuation. Rust crate: `parakeet-rs`                            |
 | ct2rs (CTranslate2)             | deferred | —            | Отложен до реализации всех основных фич. Для оптимизации пограничных конфигураций (Intel CPU-only). Блокеры в `.claude/docs/audio-pipeline.md`         |
 | enigo text injection            | planned  | —            | Hybrid: SendInput <100 chars, clipboard+paste for longer. **Requires design:** input mode setting (auto / always type / always paste)                  |
@@ -189,7 +191,6 @@ Statuses: `done`, `in-progress`, `planned`, `requires design` (UX/UI must be agr
 | Hotkey fallback                 | planned  | —            | **Requires design:** which key, configurability, global hotkey via Tauri                                                                               |
 | Model download mechanism        | planned  | —            | **Requires design:** download progress UI, sources, checksum verification, retry, offline fallback (user brings own models)                            |
 | Configurable model paths        | planned  | —            | Canonical paths already used (Windows `C:\creo-data\models\`, Linux `~/.local/share/creo/models/`). This feature is about UI settings for custom paths |
-| Whisper tiny for wake word      | planned  | —            | Currently base (~150MB), target tiny (~75MB). Switch after pipeline stabilization                                                                      |
 
 </details>
 

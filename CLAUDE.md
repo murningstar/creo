@@ -57,9 +57,10 @@
 - **parakeet-rs** — основной STT (Parakeet TDT 0.6B, ONNX Runtime: CUDA/DirectML/CPU). Целевой движок для всех платформ
 - **whisper-rs** (whisper.cpp, GGML base model) — fallback STT, текущий placeholder до интеграции parakeet-rs
 - ct2rs (CTranslate2) — отложен до реализации всех основных фич; актуален для оптимизации пограничных конфигураций (Intel CPU-only). Детали и блокеры в [audio-pipeline.md](.claude/docs/audio-pipeline.md#потенциал-для-будущей-оптимизации-ct2rs)
-- **embedding.rs** — shared EmbeddingExtractor (mel+embedding ONNX), DTW utilities, FrameSequence type. Используется в wakeword.rs и subcommand.rs
+- **embedding.rs** — shared EmbeddingExtractor (mel+embedding ONNX), DTW utilities, FrameSequence type, `save_frames_file()`/`load_frames_file()`. Используется в wakeword.rs и subcommand.rs
 - **subcommand.rs** — SubcommandCascade, SubcommandTier trait, DtwTier, manifest types (SubcommandDef, ParametricTemplate, SlotDef)
-- **enigo** — ввод текста в активное приложение (гибрид: SendInput < 100 символов, clipboard+paste для длинного)
+- **capture.rs** — AudioCapture (cpal wrapper), AudioResampler, `capture_speech_vad()` (shared VAD capture loop)
+- **enigo + arboard** — ввод текста в активное приложение. Два режима: Paste (clipboard + Ctrl+V, default) и Type (enigo char-by-char). Режим выбирается в settings
 - **rodio/cpal** — звуковой feedback
 
 ---
@@ -100,12 +101,12 @@
 
 ```
 src/
-├── app/              # Wiring: entrypoint, plugins, styles, routes
+├── app/              # Wiring: entrypoint, plugins, styles, dictation-flow
 ├── pages/            # Страницы (маршруты Nuxt), организуют взаимодействие фич
 ├── widgets/          # Составные блоки: композиция фич для переиспользования между страницами
 ├── features/         # Пользовательские взаимодействия (переиспользуемые между страницами)
 ├── entities/         # Бизнес-сущности (stores, models, типы)
-└── shared/           # Фундамент: UI kit, утилиты, БЕЗ бизнес-логики
+└── shared/           # Фундамент: UI kit, утилиты, wire-format types, БЕЗ бизнес-логики
 ```
 
 ### Главное правило: иерархия импортов
@@ -127,7 +128,7 @@ app → pages → widgets → features → entities → shared
 | **shared**   | UI kit, утилиты, api-клиент. БЕЗ бизнес-логики                    | Код не зависит от домена                                                                                    |
 | **entities** | Бизнес-сущности (audio, settings, platform)                       | Реальная бизнес-концепция                                                                                   |
 | **features** | Пользовательские взаимодействия (recording-flow, hotkey-recorder) | Переиспользуется на 2+ страницах                                                                            |
-| **widgets**  | Композиция фич в крупные блоки (rename-assistant)                 | Функционал страницы нужен на другой странице; ИЛИ композиция фич, которые не могут импортировать друг друга |
+| **widgets**  | Композиция фич в крупные блоки                                    | Функционал страницы нужен на другой странице; ИЛИ композиция фич, которые не могут импортировать друг друга |
 | **pages**    | Страницы, организуют всё вместе                                   | Маршрут приложения                                                                                          |
 | **app**      | Wiring: entrypoint, plugins, styles                               | App-wide конфигурация                                                                                       |
 
@@ -181,7 +182,7 @@ app → pages → widgets → features → entities → shared
 - **App.vue:** `@/app/entrypoint/app.vue`
 - **Layouts:** `shared/ui/layouts`
 - **Plugins:** `app/plugins`
-- **Auto-import компонентов из shared:** паттерн `{shared}/**/ui/*/*.vue`, префикс `c`
+- **Компоненты из shared:** импортируются явно через barrel `index.ts` (auto-import отключен)
 - **DevServer:** http://0.0.0.0:4730 (без HTTPS)
 - **Overlay window:** второе Tauri-окно (`label: "overlay"`), transparent, always-on-top, click-through, no decorations. Capabilities в `capabilities/overlay.json`. `tauri-plugin-window-state` denylists "overlay" (prevents corrupted state restore)
 
@@ -194,8 +195,7 @@ app → pages → widgets → features → entities → shared
 **Компоненты:**
 
 - `u-*` — NuxtUI
-- `c-*` — Custom shared компоненты (auto-imported)
-- `C*` — Импортируемые компоненты (PascalCase)
+- `C*` — Импортируемые компоненты (PascalCase, explicit imports через barrel `index.ts`)
 
 **Store методы:**
 
@@ -211,7 +211,7 @@ app → pages → widgets → features → entities → shared
 
 **Tauri events (Rust → Frontend):**
 
-- Именование: `audio-state-changed`, `vad-state`, `transcription`, `wake-command`, `audio-error`
+- Именование: `audio-state-changed`, `vad-state`, `transcription`, `wake-command`, `audio-error`, `hotkey-pressed`, `hotkey-released`, `models-status-changed`
 - `vad-amplitude` — RMS amplitude per VAD frame (для overlay waveform)
 - `stt-engine-resolved` — какой STT engine был фактически выбран
 - `subcommand-match` — subcommand recognized (command, action, confidence, tier, params)
@@ -223,12 +223,15 @@ app → pages → widgets → features → entities → shared
 
 - Поля приватные, доступ только через методы
 - `transition_mode(app, new_mode)` — единственный способ менять mode (атомарно: set + emit). Прямая запись в mode запрещена — гарантирует sync между Rust и frontend
-- `join_threads()`, `push_thread()` — safe mutex access (без unwrap, через map_err)
+- `join_threads()`, `push_thread()`, `set_trans_tx()`, `request_reload_references()` — safe mutex access (без unwrap, через map_err, все возвращают `Result`)
 
 **Domain types:**
 
-- Все payload/model структуры (`AudioMode`, `ModelInfo`, `ModelStatus`, `WakeCommand`, etc.) живут в `audio/mod.rs`
-- `commands.rs` — только Tauri command handlers + platform-specific logic (`get_models_dir`)
+- Все payload/model структуры (`AudioMode`, `ModelInfo`, `ModelStatus`, `WakeCommand`, `RecordResult`, `WakeCommandInfo`, etc.) живут в `audio/mod.rs`
+- `commands.rs` — только Tauri command handlers + platform-specific logic (`get_models_dir`). Без domain types, без бизнес-логики
+- `capture.rs` — `AudioCapture`, `AudioResampler`, `capture_speech_vad()` (shared VAD capture loop)
+- `embedding.rs` — `EmbeddingExtractor`, DTW utilities, `save_frames_file()`/`load_frames_file()`
+- `stt.rs` — `DictationEngine` trait, `WhisperEngine`, `ParakeetEngine`, `resolve_stt_engine()`
 
 **Model validation:**
 
@@ -246,7 +249,7 @@ app → pages → widgets → features → entities → shared
 - Enum'ы с serde НЕ используют `rename_all` — каждый вариант имеет явный `#[serde(rename = "...")]`
 - Это развязывает имя Rust-варианта и сериализованное значение: переименование варианта не ломает данные на диске / frontend
 - При переименовании старого значения — добавлять `#[serde(alias = "old_name")]` для обратной совместимости
-- Snapshot-тесты в `audio/mod.rs` проверяют стабильность wire format — если тест упал, значит изменился формат, нужна миграция
+- Snapshot-тесты проверяют стабильность wire format: `audio/mod.rs` (AudioMode, WakeAction), `system/detect.rs` (GpuVendor, DisplayServer), `input/mod.rs` (TextInputMethod). Если тест упал, значит изменился формат, нужна миграция
 
 ### File Structure per Segment
 
@@ -281,10 +284,17 @@ segment/
 
 - Включает `sttEngine: SttEngine` (`'auto'` | `'parakeet'` | `'whisper'`)
 
-**subcommands** (`entities/subcommands/`):
+**wake-commands** (`entities/wake-commands/`):
 
-- Pinia store для subcommand CRUD + DTW sample recording
-- Types: `SubcommandDef`, `ParametricTemplate`, `SlotDef`, `SubcommandManifest`
+- Pinia store: `useWakeCommandsStore()`
+- CRUD голосовых команд: create, record, delete, rename
+- Types: `WakeCommandInfo`, `BaseCommandDef`, `WakeActionOption`
+- Lib: `buildBaseCommandName()`, `getBaseCommandNames()` в `lib/builders.ts`
+
+**shared/model/** (`shared/model/`):
+
+- Wire-format types shared across entities: `WakeAction`, `RecordResult`
+- Barrel `index.ts` re-exports all types
 
 ---
 
@@ -299,7 +309,7 @@ pnpm tauri:dev       # Tauri + Nuxt dev
 pnpm build           # Nuxt build
 pnpm tauri:build     # Tauri production build
 
-# Lint (use --quiet for verification, NOT `pnpm lint` — it has --debug)
+# Lint (use --quiet for minimal output)
 pnpm exec eslint --quiet .
 pnpm format          # Prettier
 ```
@@ -329,8 +339,8 @@ Stale docs = stale decisions = bugs from misalignment.
 
 - SSR отключен — приложение работает как SPA
 - Tauri конфиги: `tauri.conf.json5` (base), `tauri.windows.conf.json5`, `tauri.linux.conf.json5`. **Platform конфиги — delta-only** (содержат только overrides, Tauri 2 deep-мержит поверх base)
-- Tauri window: 400x600 (компактный формат для voice assistant)
-- Auto-import компонентов из shared с префиксом `c-`
+- Tauri window: 800x600 (min 600x400, resizable)
+- Компоненты из shared импортируются явно через barrel `index.ts` (auto-import отключен)
 - Layouts в `shared/ui/layouts`
 - Модели хранятся в ASCII-путях (Windows: `C:\creo-data\`, Linux: `~/.local/share/creo/`)
 - Порт dev server: 4730

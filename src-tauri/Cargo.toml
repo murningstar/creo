@@ -41,7 +41,6 @@ ort = { version = "2.0.0-rc.12", features = ["download-binaries"] }
 # Track: https://github.com/sheldonix/silero-vad-rust/issues
 whisper-rs = "0.16"
 crossbeam-channel = "0.5"
-strsim = "0.11"
 
 # Text injection
 arboard = { version = "3.6", features = ["wayland-data-control"] }
@@ -53,9 +52,7 @@ tauri-plugin-store = "2"
 # Parakeet TDT (ONNX-based STT, user-selectable alongside Whisper)
 parakeet-rs = "0.3"
 
-# Wake word / command classification (embedding + SVM)
-linfa = "0.7"
-linfa-svm = "0.7"
+# Wake word / command classification (embedding + DTW)
 ndarray = "0.17"
 dtw_rs = "0.10"
 

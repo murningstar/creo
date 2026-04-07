@@ -3,7 +3,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { usePlatformStore } from '~/entities/platform';
 import { useSettingsStore } from '~/entities/settings';
 import { useAudioStore } from '~/entities/audio';
-import { useDictationFlow } from '~/features/dictation-flow';
+import { useDictationFlow } from '../dictation-flow';
 import { formatForTauri } from '~/features/hotkey-recorder';
 
 /** Check if we're running in the main dashboard window (not overlay). */

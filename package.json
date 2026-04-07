@@ -11,8 +11,8 @@
         "build": "nuxt build",
         "preview": "nuxt preview",
         "format": "prettier --write .",
-        "lint": "eslint --debug && pnpm format",
-        "prod-lint": "eslint --concurrency auto --fix --debug",
+        "lint": "eslint && pnpm format",
+        "prod-lint": "eslint --fix",
         "tauri:dev": "tauri dev",
         "tauri:build": "tauri build",
         "prepare": "husky"
@@ -44,7 +44,6 @@
         "lint-staged": "^16.2.7",
         "prettier": "3.7.4",
         "prettier-plugin-tailwindcss": "^0.7.2",
-        "type-fest": "^5.4.4",
         "typescript": "^5.9.3",
         "vue-tsc": "^3.2.5"
     },

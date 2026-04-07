@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 
-import type { RecordResult, WakeActionType, WakeCommandInfo } from '../model/types';
-import { getBaseCommandNames } from '../model/types';
+import type { RecordResult, WakeAction, WakeCommandInfo } from '../model/types';
+import { getBaseCommandNames } from '../lib/builders';
 
 export const useWakeCommandsStore = defineStore('wake-commands', () => {
     const _commands = ref<WakeCommandInfo[]>([]);
@@ -22,7 +22,7 @@ export const useWakeCommandsStore = defineStore('wake-commands', () => {
         }
     }
 
-    async function recordSample(commandName: string, action?: WakeActionType): Promise<RecordResult | null> {
+    async function recordSample(commandName: string, action?: WakeAction): Promise<RecordResult | null> {
         _error.value = null;
         _isRecording.value = true;
         try {

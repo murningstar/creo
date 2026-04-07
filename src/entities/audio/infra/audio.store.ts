@@ -18,7 +18,7 @@ export const useAudioStore = defineStore('audio', () => {
     const _isSpeech = ref(false);
     const _lastTranscription = ref('');
     const _error = ref<string | null>(null);
-    const _unlisten = ref<UnlistenFn[]>([]);
+    let _unlisten: UnlistenFn[] = [];
     const _modelStatus = ref<ModelStatus | null>(null);
     const _activeSttEngine = ref<string | null>(null);
     const _lastSubcommandMatch = ref<SubcommandMatchEvent | null>(null);
@@ -91,7 +91,7 @@ export const useAudioStore = defineStore('audio', () => {
 
     async function setupEventListeners() {
         // Guard: cleanup existing listeners before re-registering (handles HMR / reload)
-        if (_unlisten.value.length > 0) {
+        if (_unlisten.length > 0) {
             cleanup();
         }
 
@@ -105,9 +105,7 @@ export const useAudioStore = defineStore('audio', () => {
             listen<TranscriptionEvent>('transcription', event => {
                 _lastTranscription.value = event.payload.text;
             }),
-            listen<WakeCommandEvent>('wake-command', event => {
-                console.log('Wake command:', event.payload.command);
-            }),
+            listen<WakeCommandEvent>('wake-command', () => {}),
             listen<AudioErrorEvent>('audio-error', event => {
                 _error.value = event.payload.message;
                 console.error('Audio error:', event.payload.message);
@@ -120,21 +118,18 @@ export const useAudioStore = defineStore('audio', () => {
             }),
             listen<SubcommandMatchEvent>('subcommand-match', event => {
                 _lastSubcommandMatch.value = event.payload;
-                console.log('Subcommand match:', event.payload.command, event.payload.action);
             }),
-            listen('subcommand-timeout', () => {
-                console.log('Subcommand timeout → Standby');
-            }),
+            listen('subcommand-timeout', () => {}),
         ]);
 
-        _unlisten.value = listeners;
+        _unlisten = listeners;
     }
 
     function cleanup() {
-        for (const fn_ of _unlisten.value) {
+        for (const fn_ of _unlisten) {
             fn_();
         }
-        _unlisten.value = [];
+        _unlisten = [];
     }
 
     return {

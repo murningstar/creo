@@ -1,3 +1,7 @@
+import type { WakeAction } from '~/shared/model/types';
+
+export type { WakeAction } from '~/shared/model/types';
+
 export enum AudioMode {
     Off = 'off',
     Standby = 'standby',
@@ -5,8 +9,6 @@ export enum AudioMode {
     Processing = 'processing',
     AwaitingSubcommand = 'awaiting_subcommand',
 }
-
-export type WakeAction = 'await_subcommand' | 'start_dictation' | 'stop_dictation' | 'cancel_dictation';
 
 export interface AudioStateEvent {
     mode: AudioMode;

@@ -208,13 +208,10 @@
 <script setup lang="ts">
     import { emitTo } from '@tauri-apps/api/event';
 
-    import { RenameAssistant } from '~/widgets/rename-assistant';
-    import IHold from '~/shared/ui/icons/ui/i-hold.vue';
-    import ITap from '~/shared/ui/icons/ui/i-tap.vue';
-    import IPaste from '~/shared/ui/icons/ui/i-paste.vue';
-    import IKeyboard from '~/shared/ui/icons/ui/i-keyboard.vue';
+    import RenameAssistant from './ui/rename-assistant.vue';
+    import { IHold, ITap, IPaste, IKeyboard } from '~/shared/ui/icons';
     import { HotkeyRecorder } from '~/features/hotkey-recorder';
-    import type { KeyCombo } from '~/shared/ui/keystroke-recorder/model/types';
+    import type { KeyCombo } from '~/shared/ui/keystroke-recorder';
     import type { TextInputMethod, HotkeyMode } from '~/entities/settings';
     import { useSettingsStore } from '~/entities/settings';
     import { useAudioStore } from '~/entities/audio';

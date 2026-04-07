@@ -4,6 +4,9 @@
 //!
 //! Pipeline: audio (16kHz f32) → melspectrogram.onnx → embedding_model.onnx → 96-dim frame embeddings → DTW match.
 
+use std::fs;
+use std::path::Path;
+
 use anyhow::{anyhow, Context, Result};
 use ort::session::Session;
 use ort::value::Tensor;
@@ -176,4 +179,64 @@ pub fn cosine_distance_frames(a: &[f32; EMBEDDING_DIM], b: &[f32; EMBEDDING_DIM]
         return 1.0;
     }
     1.0 - dot / denom
+}
+
+// --- File I/O for .frames files ---
+
+/// Save a frame sequence to a binary `.frames` file.
+/// Format: [n_frames: u32 LE][n_dims: u32 LE][frame0_val0: f32 LE][frame0_val1: f32 LE]...
+pub fn save_frames_file(path: &Path, frames: &[[f32; EMBEDDING_DIM]]) -> Result<()> {
+    let mut data: Vec<u8> = Vec::new();
+    let n_frames = frames.len() as u32;
+    let n_dims = EMBEDDING_DIM as u32;
+    data.extend_from_slice(&n_frames.to_le_bytes());
+    data.extend_from_slice(&n_dims.to_le_bytes());
+    for frame in frames {
+        for &val in frame {
+            data.extend_from_slice(&val.to_le_bytes());
+        }
+    }
+    fs::write(path, &data)?;
+    Ok(())
+}
+
+/// Load a frame sequence from a binary `.frames` file.
+pub fn load_frames_file(path: &Path) -> Result<FrameSequence> {
+    let data = fs::read(path)?;
+    if data.len() < 8 {
+        return Err(anyhow!("Frames file too small"));
+    }
+
+    let n_frames = u32::from_le_bytes([data[0], data[1], data[2], data[3]]) as usize;
+    let n_dims = u32::from_le_bytes([data[4], data[5], data[6], data[7]]) as usize;
+
+    if n_dims != EMBEDDING_DIM {
+        return Err(anyhow!(
+            "Dims mismatch: expected {}, got {}",
+            EMBEDDING_DIM,
+            n_dims
+        ));
+    }
+
+    let expected = 8 + n_frames * n_dims * 4;
+    if data.len() < expected {
+        return Err(anyhow!("Frames file truncated"));
+    }
+
+    let mut frames = Vec::with_capacity(n_frames);
+    for i in 0..n_frames {
+        let mut frame = [0.0f32; EMBEDDING_DIM];
+        for j in 0..n_dims {
+            let offset = 8 + (i * n_dims + j) * 4;
+            frame[j] = f32::from_le_bytes([
+                data[offset],
+                data[offset + 1],
+                data[offset + 2],
+                data[offset + 3],
+            ]);
+        }
+        frames.push(frame);
+    }
+
+    Ok(frames)
 }

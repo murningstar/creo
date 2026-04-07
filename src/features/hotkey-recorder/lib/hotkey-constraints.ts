@@ -1,14 +1,8 @@
-import type { KeyCombo } from '~/shared/ui/keystroke-recorder/model/types';
+import type { KeyCombo } from '~/shared/ui/keystroke-recorder';
+import type { HotkeyIssue, ComboChecker } from '../model/types';
 
 // Platform identifier matching @tauri-apps/plugin-os Platform type
 type Platform = 'windows' | 'linux' | 'macos';
-
-export interface HotkeyIssue {
-    severity: 'error' | 'warning';
-    message: string;
-}
-
-type ComboChecker = (combo: KeyCombo) => HotkeyIssue | null;
 
 // --- Individual constraint checkers ---
 
