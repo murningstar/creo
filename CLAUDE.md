@@ -57,10 +57,14 @@
 - **parakeet-rs** — основной STT (Parakeet TDT 0.6B, ONNX Runtime: CUDA/DirectML/CPU). Целевой движок для всех платформ
 - **whisper-rs** (whisper.cpp, GGML base model) — fallback STT, текущий placeholder до интеграции parakeet-rs
 - ct2rs (CTranslate2) — отложен до реализации всех основных фич; актуален для оптимизации пограничных конфигураций (Intel CPU-only). Детали и блокеры в [audio-pipeline.md](.claude/docs/audio-pipeline.md#потенциал-для-будущей-оптимизации-ct2rs)
+- **vad.rs** — SileroVad: Silero VAD v6 через ort/ONNX, 512-sample chunks + 64-sample context, adaptive threshold
+- **wakeword.rs** — WakeWordDetector: Google speech-embedding 96-dim + DTW frame-level matching (primary), centroid cosine (fallback для legacy .emb samples). DetectionResult → WakeAction
 - **embedding.rs** — shared EmbeddingExtractor (mel+embedding ONNX), DTW utilities, FrameSequence type, `save_frames_file()`/`load_frames_file()`. Используется в wakeword.rs и subcommand.rs
 - **subcommand.rs** — SubcommandCascade, SubcommandTier trait, DtwTier, manifest types (SubcommandDef, ParametricTemplate, SlotDef)
 - **capture.rs** — AudioCapture (cpal wrapper), AudioResampler, `capture_speech_vad()` (shared VAD capture loop)
-- **enigo + arboard** — ввод текста в активное приложение. Два режима: Paste (clipboard + Ctrl+V, default) и Type (enigo char-by-char). Режим выбирается в settings
+- **pipeline.rs** — оркестрация: 3 потока (capture, VAD processing, transcription), mode transitions, silence timeouts (300ms standby / 800ms dictation), audio overlap (500ms), event emission
+- **input/** — `mod.rs` (TextInputMethod enum: Paste/Type), `injector.rs` (trait + dispatch), `paste.rs` (PasteInjector: arboard + Ctrl+V/Cmd+V), `typer.rs` (TypeInjector: enigo char-by-char)
+- **system/detect.rs** — SystemInfo, GpuVendor, DisplayServer, detect_system(), detect_display_server(). GPU через Vulkan/ash с Drop-guard
 - **rodio/cpal** — звуковой feedback
 
 ---
@@ -320,14 +324,21 @@ pnpm format          # Prettier
 
 ### Docs Sync Protocol
 
-**При изменении pipeline поведения, state machine, моделей, persistence — обновлять ВСЕ затронутые документы в том же коммите:**
+**При изменении кода — обновлять ВСЕ затронутые документы в том же коммите.** Stale docs = stale decisions = bugs from misalignment.
 
-- `CLAUDE.md` — project spec (authoritative)
-- `.claude/docs/audio-pipeline.md` — pipeline diagram, models table
-- `.claude/docs/evolution-plan.md` — architecture decisions, model choices
-- `README.md` — user-facing model download instructions
+**Документ → когда обновлять:**
 
-Stale docs = stale decisions = bugs from misalignment.
+| Документ                                 | Обновлять при изменениях в                                                                                                                                                                                                         |
+| ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **`CLAUDE.md`**                          | Добавление/удаление entity, feature, module. Изменение FSD структуры. Новые Tauri events. Изменение conventions (naming, serde, store patterns). Изменение commands/scripts. Любое изменение проектных правил                      |
+| **`README.md`**                          | Roadmap статусы (фича done/planned). ML модели (добавление/замена/удаление). Build prerequisites. Architecture diagram (pipeline flow). Known issues (resolved/new)                                                                |
+| **`.claude/docs/audio-pipeline.md`**     | Изменение VAD (chunk size, model version, threshold). Добавление/замена ML модели. Silence timeouts. Hardware acceleration. Auto-config logic. STT engine changes                                                                  |
+| **`.claude/docs/evolution-plan.md`**     | Архитектурные решения (tier добавлен/убран, модель заменена). DTW параметры (threshold, band). Milestone завершён (обновить сводную таблицу). Мониторируемая технология стала viable. Dictation tuning (overlap, silence, context) |
+| **`.claude/docs/architecture-audit.md`** | Фикс открытого finding (M5). Реализация Future-proofing item (F1-F3). Новый аудит                                                                                                                                                  |
+| **`.claude/docs/platform.md`**           | Изменения в `input/paste.rs`, overlay window поведение, build workarounds, добавление macOS support, data directory paths                                                                                                          |
+| **`.claude/docs/ux-requirements.md`**    | Overlay visual states. Новые banners/guides. Wizard steps. Text input modes. Hotkey поведение. History design                                                                                                                      |
+| **`.claude/docs/next-session.md`**       | Завершение TODO из списка. Новые known issues. **Перезаписывать в конце каждой рабочей сессии**                                                                                                                                    |
+| **`.claude/docs/hotkeys/*.md`**          | Изменение hotkey implementation, default combo, platform-specific поведение                                                                                                                                                        |
 
 ### UX/UI Protocol
 
