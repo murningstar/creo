@@ -28,6 +28,11 @@ const OVERLAP_SAMPLES: usize = 8000; // 500ms at 16kHz
 /// AwaitingSubcommand timeout: return to Standby after this many seconds without a match.
 const SUBCOMMAND_TIMEOUT_SECS: u64 = 10;
 
+/// Wake word debounce: minimum time between consecutive accepted detections (ms).
+/// Prevents rapid-fire false positives during continuous speech.
+/// Applied only to WakeWordCheck (Standby mode), NOT to DictationChunk (stop/cancel must work immediately).
+const WAKE_DEBOUNCE_MS: u64 = 2000;
+
 pub fn start_pipeline(
     app_handle: AppHandle,
     handle: Arc<PipelineHandle>,
@@ -343,6 +348,9 @@ fn transcription_thread(
     let mut dictation_engine = dictation_engine_factory()?;
     log::info!("Dictation engine loaded: {}", dictation_engine.name());
 
+    // Debounce: suppress rapid-fire wake detections in Standby mode
+    let mut last_wake_detection: Option<Instant> = None;
+
     loop {
         if handle.is_shutdown() {
             break;
@@ -362,6 +370,18 @@ fn transcription_thread(
                 } else {
                     match wake_detector.detect(&audio) {
                         Some(detection) => {
+                            // Debounce: suppress if too soon after last detection
+                            if let Some(last) = last_wake_detection {
+                                if last.elapsed() < Duration::from_millis(WAKE_DEBOUNCE_MS) {
+                                    log::info!(
+                                        "Wake detection debounced ({}ms since last)",
+                                        last.elapsed().as_millis()
+                                    );
+                                    let _ = result_tx.send(TranscriptionResult::NoMatch);
+                                    continue;
+                                }
+                            }
+                            last_wake_detection = Some(Instant::now());
                             let _ = result_tx
                                 .send(TranscriptionResult::WakeAction(detection.action));
                         }

@@ -31,6 +31,12 @@ use super::WakeAction;
 /// Cosine similarity threshold for centroid fallback (old .emb-only samples).
 const CENTROID_THRESHOLD: f32 = 0.7;
 
+/// Minimum ratio of second-best to best DTW distance for confident detection.
+/// Prevents false positives when input is ambiguous (all commands score similarly).
+/// Value 1.5 means second-best distance must be ≥50% larger than best.
+/// Only applies when 2+ commands are registered.
+const CONFIDENCE_RATIO_MIN: f32 = 1.5;
+
 pub struct DetectionResult {
     pub action: WakeAction,
     pub command_name: String,
@@ -96,6 +102,12 @@ impl WakeWordDetector {
 
     /// Detect command in audio segment (16kHz mono f32).
     /// Primary: DTW frame-level matching. Fallback: centroid cosine similarity.
+    ///
+    /// Detection pipeline:
+    /// 1. Extract frame embeddings from audio
+    /// 2. Compute DTW distance to ALL registered commands
+    /// 3. Apply absolute threshold (DTW_DISTANCE_THRESHOLD)
+    /// 4. Apply confidence ratio filter (best vs second-best distance)
     pub fn detect(&mut self, audio: &[f32]) -> Option<DetectionResult> {
         let input_frames = match self.extractor.extract_frame_embeddings(audio) {
             Ok(frames) if !frames.is_empty() => frames,
@@ -107,17 +119,19 @@ impl WakeWordDetector {
         };
 
         if input_frames.len() < MIN_DETECTION_FRAMES {
-            log::info!(
-                "DTW detect: input {} frames < minimum {} — skipping (too short for wake word)",
+            log::debug!(
+                "DTW: {} frames < {} minimum, skipping",
                 input_frames.len(),
                 MIN_DETECTION_FRAMES,
             );
             return None;
         }
 
-        let mut best: Option<(f32, WakeAction, String)> = None;
+        log::info!("DTW detect: {} frames", input_frames.len());
 
-        log::info!("DTW detect: input {} frames", input_frames.len());
+        // Phase 1: compute DTW distances for ALL commands (not just those below threshold)
+        let mut dtw_scores: Vec<(f32, WakeAction, String)> = Vec::new();
+        let mut centroid_best: Option<(f32, WakeAction, String)> = None;
 
         for (name, _centroid) in &self.centroids {
             let cmd = match self.action_map.get(name) {
@@ -135,21 +149,17 @@ impl WakeWordDetector {
                     let min_distance = distances.iter().copied().fold(f32::MAX, f32::min);
 
                     log::info!(
-                        "  '{}' DTW distances: [{}] min={:.4} threshold={:.4} {}",
+                        "  '{}' DTW: [{}] min={:.4}",
                         name,
-                        distances.iter().map(|d| format!("{:.4}", d)).collect::<Vec<_>>().join(", "),
+                        distances
+                            .iter()
+                            .map(|d| format!("{:.4}", d))
+                            .collect::<Vec<_>>()
+                            .join(", "),
                         min_distance,
-                        DTW_DISTANCE_THRESHOLD,
-                        if min_distance < DTW_DISTANCE_THRESHOLD { "MATCH" } else { "reject" },
                     );
 
-                    let similarity = 1.0 - min_distance;
-
-                    if min_distance < DTW_DISTANCE_THRESHOLD {
-                        if best.is_none() || similarity > best.as_ref().unwrap().0 {
-                            best = Some((similarity, cmd, name.clone()));
-                        }
-                    }
+                    dtw_scores.push((min_distance, cmd, name.clone()));
                     continue;
                 }
             }
@@ -161,37 +171,84 @@ impl WakeWordDetector {
                     None => continue,
                 };
                 let similarity = cosine_similarity(&mean_emb, centroid);
-                log::info!(
-                    "  '{}' centroid similarity={:.4} threshold={:.4} {}",
-                    name,
-                    similarity,
-                    CENTROID_THRESHOLD,
-                    if similarity > CENTROID_THRESHOLD { "MATCH" } else { "reject" },
-                );
+                log::info!("  '{}' centroid: sim={:.4}", name, similarity);
                 if similarity > CENTROID_THRESHOLD {
-                    if best.is_none() || similarity > best.as_ref().unwrap().0 {
-                        best = Some((similarity, cmd, name.clone()));
+                    if centroid_best.is_none() || similarity > centroid_best.as_ref().unwrap().0 {
+                        centroid_best = Some((similarity, cmd, name.clone()));
                     }
                 }
             }
         }
 
-        if let Some((sim, action, ref name)) = best {
+        // Phase 2: evaluate DTW results — sort by distance (ascending = best first)
+        dtw_scores.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        if let Some((best_dist, best_action, ref best_name)) = dtw_scores.first().cloned() {
+            if best_dist < DTW_DISTANCE_THRESHOLD {
+                // Confidence ratio check (only meaningful with 2+ commands)
+                if dtw_scores.len() >= 2 {
+                    let second_dist = dtw_scores[1].0;
+                    let ratio = second_dist / best_dist.max(1e-6);
+
+                    log::info!(
+                        "  confidence: best='{}' {:.4}, second='{}' {:.4}, ratio={:.2} (min {:.2})",
+                        best_name,
+                        best_dist,
+                        dtw_scores[1].2,
+                        second_dist,
+                        ratio,
+                        CONFIDENCE_RATIO_MIN,
+                    );
+
+                    if ratio < CONFIDENCE_RATIO_MIN {
+                        log::info!(
+                            "Wake word REJECTED: ambiguous (ratio {:.2} < {:.2})",
+                            ratio,
+                            CONFIDENCE_RATIO_MIN,
+                        );
+                        return None;
+                    }
+                }
+
+                log::info!(
+                    "Wake word ACCEPTED: {:?} '{}' (dist={:.4})",
+                    best_action,
+                    best_name,
+                    best_dist,
+                );
+
+                return Some(DetectionResult {
+                    action: best_action,
+                    command_name: best_name.to_string(),
+                    similarity: 1.0 - best_dist,
+                });
+            }
+
             log::info!(
-                "Wake word ACCEPTED: {:?} '{}' (score: {:.4})",
-                action,
-                name,
-                sim
+                "DTW: best '{}' dist={:.4} >= threshold {:.4} → no DTW match",
+                best_name,
+                best_dist,
+                DTW_DISTANCE_THRESHOLD,
             );
-        } else {
-            log::info!("Wake word: no match (all rejected)");
         }
 
-        best.map(|(similarity, action, command_name)| DetectionResult {
-            action,
-            command_name,
-            similarity,
-        })
+        // Centroid fallback
+        if let Some((sim, action, name)) = centroid_best {
+            log::info!(
+                "Wake word ACCEPTED (centroid): {:?} '{}' (sim={:.4})",
+                action,
+                name,
+                sim,
+            );
+            return Some(DetectionResult {
+                action,
+                command_name: name,
+                similarity: sim,
+            });
+        }
+
+        log::info!("Wake word: no match");
+        None
     }
 
     /// Extract a single mean embedding from audio (average of all frame embeddings).
