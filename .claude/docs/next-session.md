@@ -70,7 +70,19 @@
 - **Wayland** — click-through и always-on-top ненадёжны. Fallback: XWayland
 - **vite-plugin-checker overlay** — удаляется MutationObserver, но может появиться при первой загрузке
 - **Hardcoded "ru" language** — `commands.rs:153`, TODO: language should come from settings
-- **Compiler warnings** — 4 pre-existing: unused import, dead fields/methods in wakeword.rs
+- **Compiler warnings** — 4 pre-existing: unused import (`GlobalShortcutExt` в lib.rs), dead `current_threshold` в vad.rs, dead fields `command_name`/`similarity` в `DetectionResult` (wakeword.rs), dead `extract_mean_embedding` в wakeword.rs (legacy cosine path — решить: удалить или `#[allow(dead_code)]`)
+- **Vosk latency minor inconsistency** — evolution-plan.md: ~50ms, audio-pipeline.md: <100ms. Overlapping ranges, не flat contradiction, оставлено as-is
+- **`adfsadfsadf`** — мусорный untracked файл в корне репозитория, удалить
+- **`src/widgets/`** — пустая директория (только .gitkeep), rename-assistant перенесён в pages/settings/ui/
+
+---
+
+## Заметки для следующей сессии
+
+- **Docs Sync Protocol** (CLAUDE.md) — при ЛЮБОМ изменении кода сверяться с таблицей триггеров. Протокол покрывает 9 документов с конкретными условиями обновления
+- **overlay.vue — прямой consumer** Tauri events (не через audio store). При изменении event payload — проверять overlay.vue отдельно
+- **`cargo test`** — обязательно после любых изменений типов с `#[derive(Serialize)]` (snapshot тесты ловят wire format drift)
+- **Не удалять документы** без личного прочтения. Аудиторы/агенты могут ошибочно пометить файл как "stale" когда он содержит уникальные решения (lesson learned: next-session.md был удалён и восстановлен в этой сессии)
 
 ---
 
