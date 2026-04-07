@@ -101,59 +101,62 @@ pub fn run() {
 
             // Position overlay window in bottom-right corner (above taskbar)
             if let Some(overlay) = app.get_webview_window("overlay") {
-                if let Ok(monitor) = overlay.current_monitor() {
-                    if let Some(monitor) = monitor {
-                        let screen = monitor.size();
-                        let mon_pos = monitor.position();
-                        let scale = monitor.scale_factor();
+                let is_wayland = system::detect::detect_display_server() == system::detect::DisplayServer::Wayland;
 
-                        // Window is 96x96 with 48px circle centered inside.
-                        // The 24px transparent padding around the circle IS the margin.
-                        // Position window flush to screen edge — no Rust margin needed.
-                        // Invisible borders extend beyond screen edge (they're invisible).
-                        let window_phys = (96.0 * scale) as i32;
-                        let taskbar_phys = (48.0 * scale) as i32;
-
-                        let x = mon_pos.x + screen.width as i32 - window_phys;
-                        let y = mon_pos.y + screen.height as i32
-                            - window_phys
-                            - taskbar_phys;
-
-                        if let Err(e) = overlay.set_position(tauri::Position::Physical(
-                            tauri::PhysicalPosition::new(x, y),
-                        )) {
-                            log::warn!("Failed to position overlay window: {e}");
-                        }
-                    }
-                }
-                // Enable click-through by default
-                if let Err(e) = overlay.set_ignore_cursor_events(true) {
-                    log::warn!("Failed to set overlay click-through: {e}");
-                    let _ = app.emit("overlay-capability-degraded", serde_json::json!({
-                        "capability": "click_through",
-                        "error": e.to_string(),
-                    }));
-                }
-
-                // Dev: keep in Alt+Tab for F12 DevTools access
-                // Prod: hide from taskbar/Alt+Tab
-                if !cfg!(debug_assertions) {
-                    if let Err(e) = overlay.set_skip_taskbar(true) {
-                        log::warn!("Failed to hide overlay from taskbar: {e}");
-                    }
-                }
-
-                // Show the overlay window (starts hidden in config)
-                if let Err(e) = overlay.show() {
-                    log::warn!("Failed to show overlay window: {e}");
-                }
-
-                // Wayland: alwaysOnTop and ignoreCursorEvents may not work reliably
-                if system::detect::detect_display_server() == system::detect::DisplayServer::Wayland {
+                if is_wayland {
+                    // Wayland: transparent alwaysOnTop windows cause tao/GTK event loop panics.
+                    // Keep overlay hidden (created from config with visible: false).
                     log::warn!(
-                        "Wayland detected: overlay alwaysOnTop and click-through may not work reliably. \
+                        "Wayland detected: overlay disabled (transparent alwaysOnTop unreliable). \
                          See .claude/docs/platform.md for details."
                     );
+                } else {
+                    if let Ok(monitor) = overlay.current_monitor() {
+                        if let Some(monitor) = monitor {
+                            let screen = monitor.size();
+                            let mon_pos = monitor.position();
+                            let scale = monitor.scale_factor();
+
+                            // Window is 96x96 with 48px circle centered inside.
+                            // The 24px transparent padding around the circle IS the margin.
+                            // Position window flush to screen edge — no Rust margin needed.
+                            // Invisible borders extend beyond screen edge (they're invisible).
+                            let window_phys = (96.0 * scale) as i32;
+                            let taskbar_phys = (48.0 * scale) as i32;
+
+                            let x = mon_pos.x + screen.width as i32 - window_phys;
+                            let y = mon_pos.y + screen.height as i32
+                                - window_phys
+                                - taskbar_phys;
+
+                            if let Err(e) = overlay.set_position(tauri::Position::Physical(
+                                tauri::PhysicalPosition::new(x, y),
+                            )) {
+                                log::warn!("Failed to position overlay window: {e}");
+                            }
+                        }
+                    }
+                    // Enable click-through by default
+                    if let Err(e) = overlay.set_ignore_cursor_events(true) {
+                        log::warn!("Failed to set overlay click-through: {e}");
+                        let _ = app.emit("overlay-capability-degraded", serde_json::json!({
+                            "capability": "click_through",
+                            "error": e.to_string(),
+                        }));
+                    }
+
+                    // Dev: keep in Alt+Tab for F12 DevTools access
+                    // Prod: hide from taskbar/Alt+Tab
+                    if !cfg!(debug_assertions) {
+                        if let Err(e) = overlay.set_skip_taskbar(true) {
+                            log::warn!("Failed to hide overlay from taskbar: {e}");
+                        }
+                    }
+
+                    // Show the overlay window (starts hidden in config)
+                    if let Err(e) = overlay.show() {
+                        log::warn!("Failed to show overlay window: {e}");
+                    }
                 }
             }
 
