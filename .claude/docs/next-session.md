@@ -1,46 +1,45 @@
-# Next Session Handoff — 2026-03-29
+# Next Session Handoff — 2026-04-07
 
 ## Что было сделано в этой сессии
 
-### 1. STT Engine Selector (backend + persistence)
+### Architecture Audit Refactoring
 
-- Rust: `resolve_stt_engine(preference)` заменил `detect_stt_engine()`, принимает `"auto"/"parakeet"/"whisper"`
-- `start_listening`/`start_dictation` принимают `stt_engine: Option<String>`
-- Emits `stt-engine-resolved` event с фактически выбранным движком
-- Frontend: `SttEngine` тип + persistence в settings store
-- **UI карточка в Settings НЕ реализована** — blocked by auto-config UX проработка
+Полный аудит кодобазы (6 аудиторов + 3 валидатора) → рефакторинг по всем находкам → документация.
 
-### 2. Subcommand Cascade Architecture
+**Frontend (FSD):**
 
-- `embedding.rs` — shared `EmbeddingExtractor` извлечён из `wakeword.rs`
-- `subcommand.rs` — `SubcommandManifest`, `SubcommandDef` (dtw/vosk/llm tiers), `ParametricTemplate`, `SlotDef`, `SubcommandTier` trait, `DtwTier`, `SubcommandCascade`
-- Pipeline: `SubcommandCheck` request, cascade в transcription thread, wake words проверяются первыми в AwaitingSubcommand, 10s timeout → Standby
-- 4 Tauri commands: `get_subcommands`, `create_subcommand`, `delete_subcommand`, `record_subcommand_sample`
-- Frontend: subcommand types in Rust (`subcommand.rs`); frontend entity was removed in architecture audit refactoring (April 2026) — no UI consumers yet
-- Audio store: `SubcommandMatchEvent` + `subcommand-timeout` listeners
+- `dictation-flow` перенесён из `features/` → `app/` (app-wiring, 0 page consumers)
+- `rename-assistant` перенесён из `widgets/` → `pages/settings/ui/` (single-page usage)
+- `WakeAction` и `RecordResult` вынесены в `shared/model/types.ts` (wire-format types)
+- `WakeActionType` переименован в `WakeAction` везде
+- Barrel `index.ts` для shared/ сегментов (icons, keystroke-recorder, model)
+- `hotkey-constraints.ts`: types в `model/`, logic в `lib/`
+- `buildBaseCommandName()` / `getBaseCommandNames()` вынесены в `wake-commands/lib/builders.ts`
+- `ref()` → plain `let` для external handles (`_unlisten`, `_finishingTimeout`)
+- Удалён dead code: `entities/subcommands/`, `action-list`, ghost overlay listeners, `console.log`, `__setCurrentNativePlatform`, `c-*` auto-import config
+- Удалён `type-fest`, `--debug` из lint scripts
 
-### 3. Overlay Indicator
+**Rust backend:**
 
-- Tauri: второе окно (transparent, always-on-top, click-through, no decorations, `shadow: false`)
-- Capabilities: `overlay.json`
-- Nuxt: overlay layout + `/overlay` page
-- Визуальные состояния: Standby (breathing glow), Dictation (waveform bars), AwaitingSubcommand (⌘ icon), Processing (conic ring), Success/Error (SVG animations), Mini-badge (batch processing)
-- `vad-amplitude` event из Rust для waveform bars
-- `tauri-plugin-window-state` denylists overlay (prevents position corruption)
+- `RecordResult`/`WakeCommandInfo` перенесены из `commands.rs` → `audio/mod.rs`
+- `resolve_stt_engine` перенесён из `commands.rs` → `audio/stt.rs` (parameterized)
+- `save_frames_file`/`load_frames_file` консолидированы в `embedding.rs`
+- `capture_speech_vad()` извлечён в `capture.rs` (shared VAD loop)
+- Explicit serde renames (3 enum'а) + snapshot тесты
+- Удалён `audio/transcriber.rs` (superseded by stt.rs)
+- Production logging enabled (Warn level)
+- Vulkan instance leak fix (Drop guard)
+- Mutex poison handling стандартизирован
+- Overlay capabilities trimmed
+- Удалены `strsim`, `linfa`, `linfa-svm`
 
-### 4. System Tray
+**Документация:**
 
-- Tray icon с меню: "Show Dashboard" / "Quit"
-- Закрытие Dashboard → hide to tray (pipeline продолжает работать)
-- Cargo features: `tray-icon`, `image-ico`
-
-### 5. Dev Controls
-
-- Settings card (видна только в `import.meta.dev`)
-- "Suppress devtools on overlay" toggle → `emitTo('overlay', 'overlay-suppress-devtools', bool)`
-- "Click-through" toggle → `emitTo('overlay', 'overlay-set-click-through', bool)`
-- MutationObserver в overlay page убирает Vite error overlay + vite-plugin-checker overlay + Nuxt devtools
-- `init.ts` plugin пропускается в overlay window (`isMainWindow()` guard)
+- CLAUDE.md: полный Rust module inventory, wake-commands entity, Docs Sync Protocol с trigger conditions и authority hierarchy
+- README.md: architecture diagram, roadmap, text injection status
+- evolution-plan.md: dictation fixes marked DONE, summary chart updated
+- 10 противоречий между документами исправлено
+- Memory files обновлены
 
 ---
 
@@ -48,29 +47,30 @@
 
 ### Немедленно (overlay polish):
 
-1. **Overlay positioning fix** — Windows invisible borders (WS_THICKFRAME) вызывают ~24px offset. Решение: Win32 API через `windows-sys` crate — `SetWindowLongPtrW` убрать `WS_THICKFRAME`. ~10 строк platform-specific кода.
-2. **Cursor proximity fade** — Rust polling thread (20Hz) → `cursor_position()` → compute distance → `emit_to("overlay", "cursor-proximity", f64)`. Overlay opacity = 1.0 - proximity \* 0.8.
-3. **Error click-through toggle** — при `audio-error` Rust отключает click-through на overlay, после dismiss включает обратно.
-4. **Corner position setting** — `OverlayCorner` type в settings, Rust repositions overlay based on preference.
-5. **Batch dictation accumulation** — accumulate batches в `Vec<String>`, вставка в конце по умолчанию (опция инкрементальной вставки в settings).
+1. **Overlay positioning fix** — Windows invisible borders (WS_THICKFRAME) вызывают ~24px offset. Решение: Win32 API через `windows-sys` crate — `SetWindowLongPtrW` убрать `WS_THICKFRAME`
+2. **Cursor proximity fade** — Rust polling thread (20Hz) → `cursor_position()` → compute distance → `emit_to("overlay", "cursor-proximity", f64)`
+3. **Error click-through toggle** — при `audio-error` Rust отключает click-through на overlay
+4. **Corner position setting** — `OverlayCorner` type в settings
+5. **Batch dictation accumulation** — accumulate batches в `Vec<String>`, вставка в конце по умолчанию
 
 ### Следующие задачи (из roadmap):
 
 6. **Vosk integration** (Tier 2) — `vosk-rs`, grammar mode, `[unk]` rejection
-7. **Qwen3 1.7B integration** (Tier 3) — `llama-cpp-2` + GBNF, dynamic system prompt, parametric command UI
-8. **Auto-config + Wizard** — system detection → model recommendations → download with progress → wake word recording
+7. **Qwen3 1.7B integration** (Tier 3) — `llama-cpp-2` + GBNF, dynamic system prompt
+8. **Auto-config + Wizard** — system detection → model recommendations → download
 9. **History persistence** — backend storage + UI list
 10. **Sound feedback** — rodio sounds
-11. **Hybrid text injection** — auto paste/type
+11. **Hybrid text injection** — auto paste/type by length
 
 ---
 
 ## Известные проблемы
 
-- **Overlay position offset (~24px)** — invisible borders on Windows. Fix: Win32 API `SetWindowLongPtrW` to remove `WS_THICKFRAME`
+- **Overlay position offset (~24px)** — invisible borders on Windows
 - **Wayland** — click-through и always-on-top ненадёжны. Fallback: XWayland
-- **vite-plugin-checker overlay** — удаляется MutationObserver, но может появиться при первой загрузке до mount
-- **DevControls toggles** — работают через `emitTo`, нужен перезапуск dev server после изменений в Rust
+- **vite-plugin-checker overlay** — удаляется MutationObserver, но может появиться при первой загрузке
+- **Hardcoded "ru" language** — `commands.rs:153`, TODO: language should come from settings
+- **Compiler warnings** — 4 pre-existing: unused import, dead fields/methods in wakeword.rs
 
 ---
 
@@ -81,6 +81,7 @@
 - **Вставка в конце по умолчанию** — батчи копятся, вставляются по "готово". Опция инкрементальной вставки. Причина: возможность LLM post-processing.
 - **Off mode не нужен в production** — Creo всегда слушает (минимум Standby). Off = закрытое приложение.
 - **Quality > model size** — при auto-config рекомендовать качественную модель, fallback на лёгкую только если hardware не тянет.
+- **CLAUDE.md = authoritative spec** — при противоречии между документами обновляется другой документ, не CLAUDE.md.
 
 ---
 

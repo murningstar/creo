@@ -75,7 +75,7 @@
 > **Evolution plan:** [`.claude/docs/evolution-plan.md`](.claude/docs/evolution-plan.md) — tiered cascade architecture, модели по ролям, эволюционный путь от текущего состояния к целевому. **Сверяться:** при любых изменениях в audio pipeline, при анализе текущего состояния точек соприкосновения технологий, при неполадках (плохое определение wake words, плохая транскрипция, false positives).
 > **Architecture audit:** [`.claude/docs/architecture-audit.md`](.claude/docs/architecture-audit.md) — 25 findings от 3 independent auditors (2026-03-27). Статусы обновляются по мере фиксов. **Сверяться:** перед любой cross-cutting доработкой, при архитектурных решениях.
 
-Краткая схема: Микрофон (cpal) → Silero VAD v6 (ort/ONNX) → speech buffer → [wake words: Google embedding + DTW] / [dictation: whisper-rs base] → Tauri events → Vue frontend. Три потока: capture, VAD processing, transcription (DTW + whisper).
+Краткая схема: Микрофон (cpal) → Silero VAD v6 (ort/ONNX) → speech buffer → [wake words: Google embedding + DTW] / [dictation: whisper-rs base] → Tauri events → Vue frontend. Два потока: processing (VAD + cpal capture internally) и transcription (DTW + STT).
 
 **STT engine selection:**
 
