@@ -42,6 +42,7 @@ pub fn start_pipeline(
     emb_model_path: String,
     wakewords_dir: String,
     subcommands_dir: String,
+    vosk_model_path: Option<String>,
     dictation_engine_factory: Box<dyn FnOnce() -> Result<Box<dyn DictationEngine>> + Send>,
 ) -> Result<()> {
     handle.transition_mode(&app_handle, initial_mode);
@@ -70,6 +71,7 @@ pub fn start_pipeline(
             &emb_model_path,
             &wakewords_dir,
             &subcommands_dir,
+            vosk_model_path.as_deref(),
             dictation_engine_factory,
         ) {
             log::error!("Transcription thread error: {}", e);
@@ -336,13 +338,14 @@ fn transcription_thread(
     emb_model_path: &str,
     wakewords_dir: &str,
     subcommands_dir: &str,
+    vosk_model_path: Option<&str>,
     dictation_engine_factory: Box<dyn FnOnce() -> Result<Box<dyn DictationEngine>> + Send>,
 ) -> Result<()> {
     let mut wake_detector = WakeWordDetector::new(mel_model_path, emb_model_path, wakewords_dir)?;
     log::info!("Wake word detector loaded (embedding+DTW)");
 
     let mut subcommand_cascade =
-        SubcommandCascade::new(subcommands_dir, mel_model_path, emb_model_path)?;
+        SubcommandCascade::new(subcommands_dir, mel_model_path, emb_model_path, vosk_model_path)?;
     log::info!("Subcommand cascade loaded");
 
     let mut dictation_engine = dictation_engine_factory()?;

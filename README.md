@@ -98,6 +98,19 @@ Speech-to-text model for dictation (fallback STT, placeholder until parakeet-rs 
 curl -L -o "C:\creo-data\models\ggml-base.bin" "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
 ```
 
+### Vosk Russian Model (~45 MB) — optional
+
+Grammar-constrained STT for subcommand recognition (Tier 2). Only needed when building with `--features vosk`.
+
+**Download:** go to https://alphacephei.com/vosk/models and download `vosk-model-small-ru-0.22`. Extract the directory and rename to `vosk-model-small-ru`.
+
+```bash
+# Linux
+curl -L -o /tmp/vosk-model.zip "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"
+unzip /tmp/vosk-model.zip -d ~/.local/share/creo/models/
+mv ~/.local/share/creo/models/vosk-model-small-ru-0.22 ~/.local/share/creo/models/vosk-model-small-ru
+```
+
 ### Verification
 
 After downloading, the models directory should look like:
@@ -107,7 +120,8 @@ models/
 ├── silero_vad_v6.onnx    (~1.8 MB)  — voice activity detection
 ├── melspectrogram.onnx   (~1 MB)    — wake word preprocessing
 ├── embedding_model.onnx  (~1.3 MB)  — wake word embeddings
-└── ggml-base.bin         (~150 MB)  — dictation (whisper base)
+├── ggml-base.bin         (~150 MB)  — dictation (whisper base)
+└── vosk-model-small-ru/  (~45 MB)   — subcommand recognition (optional)
 ```
 
 When the app starts, a banner will show if any models are missing, with the expected path.
@@ -183,6 +197,7 @@ Statuses: `done`, `in-progress`, `planned`, `requires design` (UX/UI must be agr
 | ------------------------------- | -------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | STT engine selector             | done     | —            | Backend + persistence (auto/parakeet/whisper). Frontend settings type. UI card in settings deferred (blocked by auto-config UX)                        |
 | Subcommand cascade architecture | done     | —            | embedding.rs, SubcommandTier trait, DtwTier (Tier 1), SubcommandCascade, capture_speech_vad() shared VAD loop                                          |
+| Vosk grammar STT (Tier 2)       | done     | libvosk      | VoskTier: grammar-constrained STT for text-based subcommands. `[unk]` rejection. Cargo feature `vosk`. Model: `vosk-model-small-ru` (~45MB)            |
 | parakeet-rs (Parakeet TDT)      | planned  | —            | Primary STT. ONNX Runtime (CUDA/DirectML/CPU). ~640MB INT8. Best Russian WER, native punctuation. Rust crate: `parakeet-rs`                            |
 | ct2rs (CTranslate2)             | deferred | —            | Отложен до реализации всех основных фич. Для оптимизации пограничных конфигураций (Intel CPU-only). Блокеры в `.claude/docs/audio-pipeline.md`         |
 | Text injection (Paste/Type)     | done     | —            | Paste (arboard clipboard + Ctrl+V) and Type (enigo char-by-char), user-selectable in settings. **Planned:** hybrid auto-switching by text length       |

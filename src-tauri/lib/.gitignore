@@ -1,0 +1,5 @@
+# Prebuilt native libraries (binary, not tracked in git)
+# Download instructions in README.md
+*.so
+*.dll
+*.dylib

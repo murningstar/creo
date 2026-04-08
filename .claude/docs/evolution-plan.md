@@ -327,7 +327,7 @@ DTW frame-level      →    (tuning)                  →    livekit-wakeword co
   (cosine fallback)
 Whisper base dictation → Quick fixes (context,      →    Parakeet TDT 0.6B v3
                           overlap, filter)
-DTW subcommands (T1) →    Vosk grammar (T2)         →    Vosk + Qwen3 1.7B + GBNF (T3)
+DTW subcommands (T1) →    Vosk grammar (T2) ✅       →    Vosk + Qwen3 1.7B + GBNF (T3)
 Нет параметров       →    (skip)                    →    Qwen3 1.7B + GBNF
 800ms dictation silence → Segment merging            →    Adaptive silence + Parakeet chunked
 ```

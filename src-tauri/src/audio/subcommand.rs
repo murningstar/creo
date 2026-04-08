@@ -2,7 +2,7 @@
 //!
 //! Architecture:
 //! - Tier 1 (DTW): Embedding-level matching for fixed subcommands (<50ms)
-//! - Tier 2 (Vosk): Grammar-constrained STT for text subcommands (<100ms) — future
+//! - Tier 2 (Vosk): Grammar-constrained STT for text subcommands (<100ms)
 //! - Tier 3 (Qwen3): LLM + GBNF for parametric commands (0.5-2s) — future
 
 use std::collections::HashMap;
@@ -241,6 +241,191 @@ impl SubcommandTier for DtwTier {
     }
 }
 
+// --- Tier 2: Vosk grammar-constrained STT ---
+
+#[cfg(feature = "vosk")]
+pub struct VoskTier {
+    model: vosk::Model,
+    /// Recognized phrase (lowercase) → (command_name, action)
+    phrase_map: HashMap<String, (String, String)>,
+    /// Grammar phrases for recognizer creation (includes "[unk]")
+    grammar: Vec<String>,
+}
+
+#[cfg(feature = "vosk")]
+impl VoskTier {
+    pub fn new(model_path: &str, manifest: &SubcommandManifest) -> Result<Self> {
+        let model = vosk::Model::new(model_path)
+            .ok_or_else(|| anyhow::anyhow!("Failed to load Vosk model from {}", model_path))?;
+
+        let mut tier = Self {
+            model,
+            phrase_map: HashMap::new(),
+            grammar: Vec::new(),
+        };
+        tier.build_grammar(manifest);
+        Ok(tier)
+    }
+
+    fn build_grammar(&mut self, manifest: &SubcommandManifest) {
+        self.phrase_map.clear();
+        self.grammar.clear();
+
+        for cmd in &manifest.commands {
+            if cmd.tier != SubcommandTierKind::Vosk {
+                continue;
+            }
+            for phrase in &cmd.phrases {
+                let lower = phrase.to_lowercase();
+                if let Some(old) = self.phrase_map.insert(
+                    lower.clone(),
+                    (cmd.name.clone(), cmd.action.clone()),
+                ) {
+                    log::warn!(
+                        "VoskTier: phrase '{}' duplicated, overwriting command '{}'",
+                        lower,
+                        old.0
+                    );
+                }
+                self.grammar.push(lower);
+            }
+        }
+
+        // [unk] enables rejection of unrecognized speech
+        self.grammar.push("[unk]".to_string());
+
+        log::info!(
+            "VoskTier: {} phrases across {} commands",
+            self.phrase_map.len(),
+            manifest
+                .commands
+                .iter()
+                .filter(|c| c.tier == SubcommandTierKind::Vosk)
+                .count()
+        );
+    }
+}
+
+#[cfg(feature = "vosk")]
+impl SubcommandTier for VoskTier {
+    fn try_match(&mut self, audio: &[f32]) -> Option<SubcommandMatch> {
+        if self.phrase_map.is_empty() {
+            return None;
+        }
+
+        // Convert f32 [-1.0, 1.0] to i16 for Vosk
+        let samples: Vec<i16> = audio
+            .iter()
+            .map(|&s| (s * 32767.0).clamp(-32768.0, 32767.0) as i16)
+            .collect();
+
+        let grammar_refs: Vec<&str> = self.grammar.iter().map(|s| s.as_str()).collect();
+        let mut recognizer =
+            match vosk::Recognizer::new_with_grammar(&self.model, 16000.0, &grammar_refs) {
+                Some(r) => r,
+                None => {
+                    log::error!("VoskTier: failed to create recognizer");
+                    return None;
+                }
+            };
+
+        recognizer.set_words(true);
+
+        // Feed entire audio buffer (short utterance, already VAD-segmented).
+        // Recognizer is created per call: grammar can change on reload(),
+        // and per-call cost is negligible for short utterances.
+        if let Err(e) = recognizer.accept_waveform(&samples) {
+            log::error!("VoskTier: accept_waveform error: {}", e);
+            return None;
+        }
+        let result = recognizer.final_result();
+
+        let single = match &result {
+            vosk::CompleteResult::Single(s) => s,
+            vosk::CompleteResult::Multiple(m) => {
+                // Shouldn't happen with max_alternatives=0 (default), but handle gracefully
+                if let Some(alt) = m.alternatives.first() {
+                    log::info!(
+                        "VoskTier: multiple result, using first: '{}' conf={:.4}",
+                        alt.text,
+                        alt.confidence
+                    );
+                    // Fall through to phrase lookup below with the text
+                    let text = alt.text.trim().to_lowercase();
+                    if text == "[unk]" || text.is_empty() {
+                        log::info!("VoskTier: [unk] or empty → reject");
+                        return None;
+                    }
+                    if let Some((name, action)) = self.phrase_map.get(&text) {
+                        return Some(SubcommandMatch {
+                            command_name: name.clone(),
+                            action: action.clone(),
+                            confidence: alt.confidence,
+                            tier: 2,
+                            params: HashMap::new(),
+                        });
+                    }
+                }
+                return None;
+            }
+        };
+
+        let text = single.text.trim().to_lowercase();
+
+        log::info!(
+            "VoskTier: recognized '{}' (words: {})",
+            text,
+            single.result.len()
+        );
+
+        // Reject [unk] or empty
+        if text == "[unk]" || text.is_empty() {
+            log::info!("VoskTier: [unk] or empty → reject");
+            return None;
+        }
+
+        // Look up command by phrase
+        if let Some((name, action)) = self.phrase_map.get(&text) {
+            let confidence = if single.result.is_empty() {
+                0.5
+            } else {
+                single.result.iter().map(|w| w.conf).sum::<f32>() / single.result.len() as f32
+            };
+
+            log::info!(
+                "  VoskTier '{}' → command='{}' action='{}' confidence={:.4} MATCH",
+                text,
+                name,
+                action,
+                confidence,
+            );
+
+            Some(SubcommandMatch {
+                command_name: name.clone(),
+                action: action.clone(),
+                confidence,
+                tier: 2,
+                params: HashMap::new(),
+            })
+        } else {
+            log::info!("  VoskTier '{}' → no matching command, reject", text);
+            None
+        }
+    }
+
+    fn reload(&mut self, commands: &[SubcommandDef], _subcommands_dir: &Path) -> Result<()> {
+        let manifest = SubcommandManifest {
+            commands: commands.to_vec(),
+        };
+        self.build_grammar(&manifest);
+        Ok(())
+    }
+
+    fn name(&self) -> &str {
+        "Vosk"
+    }
+}
+
 // --- Cascade runner ---
 
 pub struct SubcommandCascade {
@@ -254,6 +439,7 @@ impl SubcommandCascade {
         subcommands_dir: &str,
         mel_model_path: &str,
         emb_model_path: &str,
+        vosk_model_path: Option<&str>,
     ) -> Result<Self> {
         let subcommands_dir = PathBuf::from(subcommands_dir);
         let manifest = Self::load_manifest(&subcommands_dir);
@@ -266,13 +452,37 @@ impl SubcommandCascade {
         )?;
 
         let dtw_count = dtw_tier.references.len();
+        let mut tiers: Vec<Box<dyn SubcommandTier>> = vec![Box::new(dtw_tier)];
+
+        // Tier 2: Vosk grammar-constrained STT (optional)
+        #[cfg(feature = "vosk")]
+        if let Some(vosk_path) = vosk_model_path {
+            if std::path::Path::new(vosk_path).exists() {
+                match VoskTier::new(vosk_path, &manifest) {
+                    Ok(tier) => {
+                        log::info!("VoskTier loaded from {}", vosk_path);
+                        tiers.push(Box::new(tier));
+                    }
+                    Err(e) => {
+                        log::warn!("VoskTier not available: {}", e);
+                    }
+                }
+            } else {
+                log::info!("Vosk model not found at {}, skipping Tier 2", vosk_path);
+            }
+        }
+
+        #[cfg(not(feature = "vosk"))]
+        let _ = vosk_model_path; // suppress unused warning
+
         log::info!(
-            "SubcommandCascade loaded: {} DTW commands",
+            "SubcommandCascade loaded: {} DTW commands, {} tiers total",
             dtw_count,
+            tiers.len(),
         );
 
         Ok(Self {
-            tiers: vec![Box::new(dtw_tier)],
+            tiers,
             manifest,
             subcommands_dir,
         })
@@ -324,6 +534,30 @@ impl SubcommandCascade {
                 SubcommandManifest::default()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Pinned wire format for SubcommandTierKind — persisted in manifest.json.
+    /// If this fails, you changed a serialized value. Update ONLY if intentional
+    /// AND you've handled migration of existing manifest files.
+    #[test]
+    fn subcommand_tier_kind_serialization_stability() {
+        assert_eq!(
+            serde_json::to_string(&SubcommandTierKind::Dtw).unwrap(),
+            "\"dtw\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SubcommandTierKind::Vosk).unwrap(),
+            "\"vosk\""
+        );
+        assert_eq!(
+            serde_json::to_string(&SubcommandTierKind::Llm).unwrap(),
+            "\"llm\""
+        );
     }
 }
 

@@ -21,6 +21,7 @@ const MEL_MODEL_FILENAME: &str = "melspectrogram.onnx";
 const EMB_MODEL_FILENAME: &str = "embedding_model.onnx";
 const WHISPER_DICTATION_MODEL_FILENAME: &str = "ggml-base.bin";
 const PARAKEET_MODEL_DIR_NAME: &str = "parakeet-tdt";
+const VOSK_MODEL_DIR_NAME: &str = "vosk-model-small-ru";
 const WAKEWORDS_DIR_NAME: &str = "wakewords";
 const SUBCOMMANDS_DIR_NAME: &str = "subcommands";
 
@@ -44,8 +45,8 @@ pub fn check_models() -> ModelStatus {
     let mel_path = dir.join(MEL_MODEL_FILENAME);
     let emb_path = dir.join(EMB_MODEL_FILENAME);
     let dictation_path = dir.join(WHISPER_DICTATION_MODEL_FILENAME);
-
     let vad_path = dir.join(VAD_MODEL_FILENAME);
+    let vosk_path = dir.join(VOSK_MODEL_DIR_NAME);
 
     let models = vec![
         ModelInfo {
@@ -54,6 +55,7 @@ pub fn check_models() -> ModelStatus {
             path: vad_path.to_string_lossy().to_string(),
             exists: vad_path.exists(),
             size_hint: "~1.8 MB".to_string(),
+            optional: false,
         },
         ModelInfo {
             name: "Mel Spectrogram (wake word)".to_string(),
@@ -61,6 +63,7 @@ pub fn check_models() -> ModelStatus {
             path: mel_path.to_string_lossy().to_string(),
             exists: mel_path.exists(),
             size_hint: "~1 MB".to_string(),
+            optional: false,
         },
         ModelInfo {
             name: "Speech Embedding (wake word)".to_string(),
@@ -68,6 +71,7 @@ pub fn check_models() -> ModelStatus {
             path: emb_path.to_string_lossy().to_string(),
             exists: emb_path.exists(),
             size_hint: "~1.3 MB".to_string(),
+            optional: false,
         },
         ModelInfo {
             name: "Whisper Base (dictation)".to_string(),
@@ -75,10 +79,19 @@ pub fn check_models() -> ModelStatus {
             path: dictation_path.to_string_lossy().to_string(),
             exists: dictation_path.exists(),
             size_hint: "~150 MB".to_string(),
+            optional: false,
+        },
+        ModelInfo {
+            name: "Vosk Russian (subcommands)".to_string(),
+            filename: VOSK_MODEL_DIR_NAME.to_string(),
+            path: vosk_path.to_string_lossy().to_string(),
+            exists: vosk_path.exists(),
+            size_hint: "~45 MB (directory)".to_string(),
+            optional: true,
         },
     ];
 
-    let all_present = models.iter().all(|m| m.exists);
+    let all_present = models.iter().filter(|m| !m.optional).all(|m| m.exists);
 
     ModelStatus {
         models_dir: dir.to_string_lossy().to_string(),
@@ -101,6 +114,7 @@ fn start_pipeline_with_mode(
 
     let wakewords_dir = get_creo_data_dir().join(WAKEWORDS_DIR_NAME);
     let subcommands_dir = get_creo_data_dir().join(SUBCOMMANDS_DIR_NAME);
+    let vosk_model_dir = dir.join(VOSK_MODEL_DIR_NAME);
 
     if !vad_path.exists() || !mel_path.exists() || !emb_path.exists() {
         return Err(format!(
@@ -158,6 +172,13 @@ fn start_pipeline_with_mode(
         }
     };
 
+    let vosk_model_path = if vosk_model_dir.exists() {
+        Some(vosk_model_dir.to_string_lossy().to_string())
+    } else {
+        log::info!("Vosk model not found at {}, Tier 2 disabled", vosk_model_dir.display());
+        None
+    };
+
     pipeline::start_pipeline(
         app,
         state.clone(),
@@ -167,6 +188,7 @@ fn start_pipeline_with_mode(
         emb_path.to_string_lossy().to_string(),
         wakewords_dir.to_string_lossy().to_string(),
         subcommands_dir.to_string_lossy().to_string(),
+        vosk_model_path,
         dictation_engine_factory,
     )
     .map_err(|e| e.to_string())

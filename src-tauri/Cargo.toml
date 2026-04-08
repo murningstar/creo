@@ -56,6 +56,10 @@ parakeet-rs = "0.3"
 ndarray = "0.17"
 dtw_rs = "0.10"
 
+# Subcommand recognition: Vosk grammar-constrained STT (Tier 2)
+# Requires prebuilt libvosk in lib/vosk/ — see build.rs
+vosk = { version = "0.3", optional = true }
+
 # Window state persistence
 tauri-plugin-window-state = "2"
 
@@ -65,3 +69,6 @@ tauri-plugin-global-shortcut = "2"
 # System detection
 sysinfo = "0.38"
 ash = { version = "0.38", default-features = false, features = ["loaded"] }
+
+[features]
+vosk = ["dep:vosk"]

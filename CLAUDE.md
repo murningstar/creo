@@ -26,7 +26,7 @@
 1. **Wake word detection** — активация голосом через Silero VAD v6 + Google speech-embedding (96-dim ONNX) + DTW frame-level matching
 2. **Dictation** — диктовка текста с вводом через enigo (SendInput / clipboard+paste)
 3. **Voice commands** — голосовые подкоманды после "приём" (AwaitingSubcommand mode)
-4. **Subcommand cascade** — tiered recognition после "приём" (Tier 1: DTW implemented, Tier 2: Vosk planned, Tier 3: Qwen3+GBNF planned)
+4. **Subcommand cascade** — tiered recognition после "приём" (Tier 1: DTW implemented, Tier 2: Vosk implemented, Tier 3: Qwen3+GBNF planned)
 5. **Overlay indicator** — transparent always-on-top click-through window showing audio state
 6. **System tray** — tray icon с "Show Dashboard" / "Quit", hide-to-tray при закрытии main window
 7. **Auto-configuration** — автоопределение железа, подбор оптимальной модели
@@ -54,13 +54,14 @@
 - **Silero VAD v6** (ONNX Runtime / `ort`) — always-on voice activity detection (~0.4% CPU)
 - **Google speech-embedding** (mel + embedding ONNX) — 96-dim wake word embeddings, language-agnostic
 - **dtw_rs** — DTW frame-level matching для wake word detection
+- **vosk** (optional, cargo feature `vosk`) — Kaldi-based grammar-constrained STT для subcommand recognition (Tier 2). Requires prebuilt `libvosk` in `src-tauri/lib/vosk/`. Model: `vosk-model-small-ru` (~45MB directory) в models dir
 - **parakeet-rs** — основной STT (Parakeet TDT 0.6B, ONNX Runtime: CUDA/DirectML/CPU). Целевой движок для всех платформ
 - **whisper-rs** (whisper.cpp, GGML base model) — fallback STT, текущий placeholder до интеграции parakeet-rs
 - ct2rs (CTranslate2) — отложен до реализации всех основных фич; актуален для оптимизации пограничных конфигураций (Intel CPU-only). Детали и блокеры в [audio-pipeline.md](.claude/docs/audio-pipeline.md#потенциал-для-будущей-оптимизации-ct2rs)
 - **vad.rs** — SileroVad: Silero VAD v6 через ort/ONNX, 512-sample chunks + 64-sample context, adaptive threshold
 - **wakeword.rs** — WakeWordDetector: Google speech-embedding 96-dim + DTW frame-level matching (primary), centroid cosine (fallback для legacy .emb samples). DetectionResult → WakeAction
 - **embedding.rs** — shared EmbeddingExtractor (mel+embedding ONNX), DTW utilities, FrameSequence type, `save_frames_file()`/`load_frames_file()`. Используется в wakeword.rs и subcommand.rs
-- **subcommand.rs** — SubcommandCascade, SubcommandTier trait, DtwTier, manifest types (SubcommandDef, ParametricTemplate, SlotDef)
+- **subcommand.rs** — SubcommandCascade, SubcommandTier trait, DtwTier, VoskTier (feature-gated `vosk`), manifest types (SubcommandDef, ParametricTemplate, SlotDef)
 - **capture.rs** — AudioCapture (cpal wrapper), AudioResampler, `capture_speech_vad()` (shared VAD capture loop)
 - **pipeline.rs** — оркестрация: 2 потока (processing + transcription; cpal capture внутри processing thread, Stream is !Send), mode transitions, silence timeouts (300ms standby / 800ms dictation), audio overlap (500ms), event emission
 - **input/** — `mod.rs` (TextInputMethod enum: Paste/Type), `injector.rs` (trait + dispatch), `paste.rs` (PasteInjector: arboard + Ctrl+V/Cmd+V), `typer.rs` (TypeInjector: enigo char-by-char)
@@ -231,7 +232,7 @@ app → pages → widgets → features → entities → shared
 
 **Domain types:**
 
-- Все payload/model структуры (`AudioMode`, `ModelInfo`, `ModelStatus`, `WakeCommand`, `RecordResult`, `WakeCommandInfo`, etc.) живут в `audio/mod.rs`
+- Все payload/model структуры (`AudioMode`, `ModelInfo`, `ModelStatus`, `WakeAction`, `RecordResult`, `WakeCommandInfo`, etc.) живут в `audio/mod.rs`
 - `commands.rs` — только Tauri command handlers + platform-specific logic (`get_models_dir`). Без domain types, без бизнес-логики
 - `capture.rs` — `AudioCapture`, `AudioResampler`, `capture_speech_vad()` (shared VAD capture loop)
 - `embedding.rs` — `EmbeddingExtractor`, DTW utilities, `save_frames_file()`/`load_frames_file()`
@@ -319,6 +320,8 @@ pnpm format          # Prettier
 
 # Rust tests (run after any serde type changes — snapshot tests catch wire format drift)
 cd src-tauri && cargo test
+# With Vosk (requires libvosk in lib/vosk/)
+cd src-tauri && cargo test --features vosk
 ```
 
 ---
@@ -373,6 +376,7 @@ cd src-tauri && cargo test
 
 - **LLVM/Clang** — требуется для `whisper-rs-sys` (bindgen). Windows: `winget install LLVM.LLVM`, задать `LIBCLANG_PATH="C:/Program Files/LLVM/bin"`
 - **CMake** — требуется для `whisper-rs-sys` (компиляция whisper.cpp). Windows: `winget install Kitware.CMake`, добавить в PATH
+- **libvosk** (optional, cargo feature `vosk`) — prebuilt shared library в `src-tauri/lib/vosk/`. Download: https://github.com/alphacep/vosk-api/releases/tag/v0.3.45 (Linux: `vosk-linux-x86_64-0.3.45.zip`, Windows: `vosk-win64-0.3.45.zip`). `build.rs` sets link search path + rpath
 
 ---
 

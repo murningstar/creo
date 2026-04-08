@@ -15,7 +15,7 @@ Google speech-embedding (mel ONNX 1MB + emb ONNX 1.3MB)
     │
     ├─ "Крео, приём" → AwaitingSubcommand mode (10s timeout → Standby)
     │   → Tier 1: DTW frame-level matching (✅ implemented, <50ms)
-    │   → Tier 2: Vosk grammar mode (planned, <100ms)
+    │   → Tier 2: Vosk grammar mode (✅ implemented, <100ms, feature `vosk`)
     │   → Tier 3: Qwen3 1.7B + GBNF (planned, 0.5-2s)
     │
     ├─ "Крео, вписывай" → Dictation mode
@@ -46,6 +46,7 @@ Tensor interface (v6):
 | Silero VAD v6             | Voice Activity Detection (always-on)           | ~1.8 MB     | ONNX        |
 | Mel spectrogram           | Wake word preprocessing                        | ~1 MB       | ONNX        |
 | Speech embedding          | Wake word 96-dim embeddings                    | ~1.3 MB     | ONNX        |
+| Vosk small Russian        | Subcommand recognition (Tier 2, grammar mode)  | ~45 MB      | Kaldi (dir) |
 | Whisper base              | Fallback STT, текущий placeholder              | ~150 MB     | GGML        |
 | Parakeet TDT 0.6B v3 INT8 | Main STT (ONNX Runtime)                        | ~640 MB     | ONNX        |
 | Whisper models via ct2rs  | Отложен (оптимизация пограничных конфигураций) | 500MB-1.5GB | CTranslate2 |

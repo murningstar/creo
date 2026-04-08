@@ -144,6 +144,10 @@ pub struct ModelInfo {
     pub exists: bool,
     #[serde(rename = "sizeHint")]
     pub size_hint: String,
+    /// Optional models (e.g. Vosk) are not required for basic pipeline operation.
+    /// `all_present` in ModelStatus only considers required models.
+    #[serde(default)]
+    pub optional: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]

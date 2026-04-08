@@ -21,5 +21,33 @@ fn main() {
         }
     }
 
+    // Vosk: link against prebuilt libvosk from src-tauri/lib/vosk/
+    #[cfg(feature = "vosk")]
+    {
+        let vosk_lib_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("lib/vosk");
+        if vosk_lib_dir.exists() {
+            println!(
+                "cargo:rustc-link-search=native={}",
+                vosk_lib_dir.display()
+            );
+            // Set rpath so the binary finds libvosk.so at runtime during development
+            #[cfg(target_os = "linux")]
+            println!(
+                "cargo:rustc-link-arg=-Wl,-rpath,{}",
+                vosk_lib_dir.display()
+            );
+            #[cfg(target_os = "macos")]
+            println!(
+                "cargo:rustc-link-arg=-Wl,-rpath,{}",
+                vosk_lib_dir.display()
+            );
+        } else {
+            println!(
+                "cargo:warning=Vosk feature enabled but lib/vosk/ not found. \
+                 Download libvosk from https://github.com/alphacep/vosk-api/releases"
+            );
+        }
+    }
+
     tauri_build::build()
 }

@@ -1,99 +1,127 @@
-# Next Session Handoff — 2026-04-07
+# Next Session Handoff — 2026-04-08
 
 ## Что было сделано в этой сессии
 
-### Architecture Audit Refactoring
+### Vosk Tier 2 Integration
 
-Полный аудит кодобазы (6 аудиторов + 3 валидатора) → рефакторинг по всем находкам → документация.
-
-**Frontend (FSD):**
-
-- `dictation-flow` перенесён из `features/` → `app/` (app-wiring, 0 page consumers)
-- `rename-assistant` перенесён из `widgets/` → `pages/settings/ui/` (single-page usage)
-- `WakeAction` и `RecordResult` вынесены в `shared/model/types.ts` (wire-format types)
-- `WakeActionType` переименован в `WakeAction` везде
-- Barrel `index.ts` для shared/ сегментов (icons, keystroke-recorder, model)
-- `hotkey-constraints.ts`: types в `model/`, logic в `lib/`
-- `buildBaseCommandName()` / `getBaseCommandNames()` вынесены в `wake-commands/lib/builders.ts`
-- `ref()` → plain `let` для external handles (`_unlisten`, `_finishingTimeout`)
-- Удалён dead code: `entities/subcommands/`, `action-list`, ghost overlay listeners, `console.log`, `__setCurrentNativePlatform`, `c-*` auto-import config
-- Удалён `type-fest`, `--debug` из lint scripts
+Полная интеграция Vosk grammar-constrained STT как Tier 2 в subcommand cascade.
 
 **Rust backend:**
 
-- `RecordResult`/`WakeCommandInfo` перенесены из `commands.rs` → `audio/mod.rs`
-- `resolve_stt_engine` перенесён из `commands.rs` → `audio/stt.rs` (parameterized)
-- `save_frames_file`/`load_frames_file` консолидированы в `embedding.rs`
-- `capture_speech_vad()` извлечён в `capture.rs` (shared VAD loop)
-- Explicit serde renames (3 enum'а) + snapshot тесты
-- Удалён `audio/transcriber.rs` (superseded by stt.rs)
-- Production logging enabled (Warn level)
-- Vulkan instance leak fix (Drop guard)
-- Mutex poison handling стандартизирован
-- Overlay capabilities trimmed
-- Удалены `strsim`, `linfa`, `linfa-svm`
+- `VoskTier` struct в `subcommand.rs` — реализует `SubcommandTier` trait, `#[cfg(feature = "vosk")]`
+- Grammar из manifest `phrases` + `[unk]` для rejection. Phrase matching case-insensitive
+- Audio f32→i16 conversion, word-level confidence aggregation
+- Wired в `SubcommandCascade` как optional Tier 2 (DTW → Vosk → future Qwen3)
+- Model path threaded через `commands.rs → pipeline.rs → subcommand.rs`
+- Graceful skip when model missing or feature disabled
+- `check_models` включает Vosk с `optional: true`
 
-**Документация:**
+**Build setup:**
 
-- CLAUDE.md: полный Rust module inventory, wake-commands entity, Docs Sync Protocol с trigger conditions и authority hierarchy
-- README.md: architecture diagram, roadmap, text injection status
-- evolution-plan.md: dictation fixes marked DONE, summary chart updated
-- 10 противоречий между документами исправлено
-- Memory files обновлены
+- `vosk = "0.3"` behind cargo feature `vosk` в Cargo.toml
+- `libvosk.so` (v0.3.45, 25MB) в `src-tauri/lib/vosk/` (gitignored, prebuilt from alphacep/vosk-api)
+- `build.rs` — link search path + rpath для runtime
+
+**Audit fixes (3 независимых аудитора):**
+
+- `ModelInfo.optional` field — `all_present` считает только required models (не блокирует UI для опциональных)
+- `accept_waveform` error logging + early return (было `let _ =`)
+- Snapshot test `subcommand_tier_kind_serialization_stability` (convention compliance)
+- Stale "— future" comment removed
+- No-op `as f32` cast removed
+- Duplicate phrase warning on `phrase_map` collision
+
+**Документация:** CLAUDE.md, audio-pipeline.md, evolution-plan.md, README.md обновлены.
 
 ---
 
 ## Что нужно сделать дальше (приоритет)
 
-### Немедленно (overlay polish):
+### Overlay polish (отложено, не критично для core):
 
-1. **Overlay positioning fix** — Windows invisible borders (WS_THICKFRAME) вызывают ~24px offset. Решение: Win32 API через `windows-sys` crate — `SetWindowLongPtrW` убрать `WS_THICKFRAME`
-2. **Cursor proximity fade** — Rust polling thread (20Hz) → `cursor_position()` → compute distance → `emit_to("overlay", "cursor-proximity", f64)`
-3. **Error click-through toggle** — при `audio-error` Rust отключает click-through на overlay
+1. **Overlay positioning fix** — Windows invisible borders (WS_THICKFRAME) ~24px offset. Win32 API через `windows-sys`
+2. **Cursor proximity fade** — Rust polling thread (20Hz) → `cursor_position()` → emit
+3. **Error click-through toggle** — при `audio-error` отключить click-through на overlay
 4. **Corner position setting** — `OverlayCorner` type в settings
-5. **Batch dictation accumulation** — accumulate batches в `Vec<String>`, вставка в конце по умолчанию
+5. **Batch dictation accumulation** — accumulate batches в `Vec<String>`, вставка в конце
 
 ### Следующие задачи (из roadmap):
 
-6. **Vosk integration** (Tier 2) — `vosk-rs`, grammar mode, `[unk]` rejection
-7. **Qwen3 1.7B integration** (Tier 3) — `llama-cpp-2` + GBNF, dynamic system prompt
-8. **Auto-config + Wizard** — system detection → model recommendations → download
-9. **History persistence** — backend storage + UI list
-10. **Sound feedback** — rodio sounds
-11. **Hybrid text injection** — auto paste/type by length
+6. **Qwen3 1.7B integration** (Tier 3) — `llama-cpp-2` + GBNF, dynamic system prompt из user templates
+7. **Auto-config + Wizard** — system detection → model recommendations → download
+8. **History persistence** — backend storage + UI list
+9. **Sound feedback** — rodio sounds
+10. **Hybrid text injection** — auto paste/type by length
+
+---
+
+## Расхождения между сессиями (требуют анализа)
+
+### C1: DTW distance threshold — docs vs code
+
+- **`evolution-plan.md:118`** говорит `0.20`, калибровочные данные: "true matches 0.05-0.15, false positives 0.24+"
+- **`embedding.rs:29`** в коде `0.15`, калибровочные данные: "true matches ≈ 0.03-0.07, false positives ≈ 0.19+"
+- **Причина:** threshold был перекалиброван в коде по реальным записям (более узкие диапазоны), но evolution-plan.md не был обновлён. Документ всё ещё содержит оригинальные research estimates.
+- **Действие:** Решить что authoritative — код (0.15) или docs (0.20). Обновить evolution-plan.md если код правильный (вероятнее, т.к. калиброван по реальным данным).
+
+### C2: Frontend ModelInfo missing `optional` field
+
+- **Rust `audio/mod.rs:147-151`**: `ModelInfo` struct имеет `pub optional: bool` с `#[serde(default)]`
+- **Frontend `entities/audio/model/types.ts:46-52`**: `ModelInfo` interface **НЕ** имеет поля `optional`
+- **Причина:** поле `optional` добавлено в Rust в этой сессии (audit fix F1), frontend type не обновлён
+- **Последствия:** Runtime не ломается (JS duck-typing, `serde(default)` = `false`), но TS type неполный — `model.optional` без cast недоступен. `allPresent` корректно считается на backend, frontend просто не видит поле.
+- **Действие:** Добавить `optional: boolean` в frontend `ModelInfo` interface. Проверить, используется ли `allPresent` / `optional` где-либо во frontend логике.
+
+### C3: Потерянный коммит `e25cb3a` — platform research notes
+
+- Коммит содержал research findings в CLAUDE.md, был reset away при синхронизации с origin
+- Code fixes для тех же проблем реализованы независимо в `a16b3f2`, но документация потеряна:
+    - Wayland `virtual-keyboard-v1` protocol limitations
+    - CTranslate2 CPU RTF benchmarks (RTF ~1.10 для turbo на i5-12450H)
+    - `distil-large-v3` подтверждение непригодности для русского
+    - OpenVINO encoder status на Intel CPU
+    - Hotkey UX: "prefer single non-symbol key over combos"
+- **Действие:** Восстановить findings в соответствующих docs (platform.md, evolution-plan.md, audio-pipeline.md). Часть уже есть в evolution-plan.md (ct2rs benchmarks, distil-large-v3), проверить полноту.
 
 ---
 
 ## Известные проблемы
 
 - **Overlay position offset (~24px)** — invisible borders on Windows
-- **Wayland** — click-through и always-on-top ненадёжны. Fallback: XWayland
+- **Wayland** — click-through и always-on-top ненадёжны. Overlay skipped (commit 3f2cea8)
 - **vite-plugin-checker overlay** — удаляется MutationObserver, но может появиться при первой загрузке
-- **Hardcoded "ru" language** — `commands.rs:153`, TODO: language should come from settings
-- **Compiler warnings** — 4 pre-existing: unused import (`GlobalShortcutExt` в lib.rs), dead `current_threshold` в vad.rs, dead fields `command_name`/`similarity` в `DetectionResult` (wakeword.rs), dead `extract_mean_embedding` в wakeword.rs (legacy cosine path — решить: удалить или `#[allow(dead_code)]`)
-- **Vosk latency minor inconsistency** — evolution-plan.md: ~50ms, audio-pipeline.md: <100ms. Overlapping ranges, не flat contradiction, оставлено as-is
+- **Hardcoded "ru" language** — `commands.rs:169`, TODO: language should come from settings
+- **Compiler warnings** — 4 pre-existing: unused `GlobalShortcutExt` (lib.rs), dead `current_threshold` (vad.rs), dead fields в `DetectionResult` (wakeword.rs), dead `extract_mean_embedding` (wakeword.rs)
 - **`adfsadfsadf`** — мусорный untracked файл в корне репозитория, удалить
-- **`src/widgets/`** — пустая директория (только .gitkeep), rename-assistant перенесён в pages/settings/ui/
+- **`src/widgets/`** — пустая директория (только .gitkeep)
+- **libvosk production bundling** — rpath в build.rs указывает на dev path. Для release: Tauri `bundle.resources` + `$ORIGIN` rpath или static link
+- **Windows vosk.dll** — нет Windows-specific DLL handling в build.rs (нужно при включении vosk на Windows)
+- **CLAUDE.md пробелы** — rubato не упомянут в Tech Stack; `app/dictation-flow/` упомянут в tree, но назначение не описано
 
 ---
 
 ## Заметки для следующей сессии
 
-- **Docs Sync Protocol** (CLAUDE.md) — при ЛЮБОМ изменении кода сверяться с таблицей триггеров. Протокол покрывает 9 документов с конкретными условиями обновления
+- **Docs Sync Protocol** (CLAUDE.md) — при ЛЮБОМ изменении кода сверяться с таблицей триггеров
 - **overlay.vue — прямой consumer** Tauri events (не через audio store). При изменении event payload — проверять overlay.vue отдельно
-- **`cargo test`** — обязательно после любых изменений типов с `#[derive(Serialize)]` (snapshot тесты ловят wire format drift)
-- **Не удалять документы** без личного прочтения. Аудиторы/агенты могут ошибочно пометить файл как "stale" когда он содержит уникальные решения (lesson learned: next-session.md был удалён и восстановлен в этой сессии)
+- **`cargo test --features vosk`** — обязательно после любых изменений типов с `#[derive(Serialize)]` (snapshot тесты, теперь 8 тестов)
+- **Не удалять документы** без личного прочтения
+- **Vosk model для тестирования:** `vosk-model-small-ru-0.22` → rename `vosk-model-small-ru` → models dir. Download: alphacephei.com/vosk/models
+- **libvosk для dev setup:** `vosk-linux-x86_64-0.3.45.zip` from github.com/alphacep/vosk-api/releases/tag/v0.3.45 → extract `libvosk.so` → `src-tauri/lib/vosk/`
 
 ---
 
 ## Ключевые архитектурные решения (context)
 
-- **3-tier cascade** — validated industry consensus (2026 research). DTW → Vosk → Qwen3+GBNF.
-- **Overlay = primary feedback** — пользователь взаимодействует голосом, overlay подтверждает. Dashboard вторичен.
-- **Вставка в конце по умолчанию** — батчи копятся, вставляются по "готово". Опция инкрементальной вставки. Причина: возможность LLM post-processing.
-- **Off mode не нужен в production** — Creo всегда слушает (минимум Standby). Off = закрытое приложение.
-- **Quality > model size** — при auto-config рекомендовать качественную модель, fallback на лёгкую только если hardware не тянет.
-- **CLAUDE.md = authoritative spec** — при противоречии между документами обновляется другой документ, не CLAUDE.md.
+- **3-tier cascade** — validated industry consensus. DTW → Vosk → Qwen3+GBNF. Tiers 1+2 implemented.
+- **Vosk grammar mode** — 0 recordings от пользователя (vs DTW 3-15 samples), scales to 50+ commands, `[unk]` rejection
+- **Feature-gated vosk** — `--features vosk` в Cargo, build stays green without libvosk
+- **ModelInfo.optional** — optional models не блокируют `all_present` check (UI/auto-start не ломается)
+- **Recognizer per call** — не кешируется: grammar может измениться после reload(), overhead negligible для коротких utterances
+- **Overlay = primary feedback** — dashboard вторичен
+- **Вставка в конце по умолчанию** — батчи копятся, вставляются по "готово"
+- **Quality > model size** — рекомендовать качественную модель, fallback на лёгкую если hardware не тянет
+- **CLAUDE.md = authoritative spec**
 
 ---
 
